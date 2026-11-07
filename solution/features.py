@@ -16,6 +16,11 @@ Groups:
   team shape        each team's centroid along the attacking direction, spread, speed and
                     forward velocity -- the team in possession spreads out and pushes up, which
                     still works while the ball is missing
+  ball flight       where the ball will be in 0.4 s and 1 s if it keeps its velocity, and how
+                    close each team is to that point -- the intended receiver of a pass
+  control           how differently the ball and each team's nearest player move (a dribbled ball
+                    moves with its player), and how many opponents press that player
+  long context      the "who is closer" evidence over the last and next 5 s and 10 s
 
 NaN stays NaN: gradient boosting handles missing values natively, which matters because the ball
 is absent on a large share of frames.
@@ -27,6 +32,10 @@ import numpy as np
 FPS = 25
 RADII_M = (3.0, 7.0)
 WINDOWS_S = (1.0, 3.0)
+LONG_WINDOWS_S = (5.0, 10.0)
+FLIGHT_S = (0.4, 1.0)
+PRESS_M = 5.0
+VEL_LAG = 2  # frames, for velocities from positions
 GAP_CAP_S = 10.0
 SPEED_SMOOTH = 5  # frames, for ball speed from positions
 
@@ -129,6 +138,42 @@ def compute(arrays, runs, swap=False):
             cols["vx_" + name] = _rolling_mean(vx, FPS, -1)
     cols["cx_gap"] = cols["cx_us"] - cols["cx_them"]
     cols["spread_ratio"] = (cols["sx_us"] * cols["sy_us"]) / (cols["sx_them"] * cols["sy_them"])
+    cols["ball_vs_cx_us"] = ball[:, 0] - cols["cx_us"]
+    cols["ball_vs_cx_them"] = ball[:, 0] - cols["cx_them"]
+
+    # Ball flight: distance from each team to where the ball is heading.
+    ball_v = np.full_like(ball, np.nan)
+    ball_v[VEL_LAG:] = (ball[VEL_LAG:] - ball[:-VEL_LAG]) * FPS / VEL_LAG
+    for horizon in FLIGHT_S:
+        target = ball + ball_v * horizon
+        to_target = np.sqrt(np.square(players - target[:, None, :]).sum(-1))
+        for side, name in ((0, "us"), (1, "them")):
+            d = to_target[:, team == side]
+            with np.errstate(all="ignore"):
+                best = np.nanmin(np.where(np.isnan(d), np.inf, d), axis=1)
+            cols["flight{:g}_{}".format(horizon, name)] = np.where(np.isinf(best), np.nan, best)
+        cols["flight{:g}_diff".format(horizon)] = (cols["flight{:g}_them".format(horizon)]
+                                                   - cols["flight{:g}_us".format(horizon)])
+
+    # Control: does the ball move with each team's nearest player, and is that player pressed?
+    players_v = np.full_like(players, np.nan)
+    players_v[VEL_LAG:] = (players[VEL_LAG:] - players[:-VEL_LAG]) * FPS / VEL_LAG
+    rows_ = np.arange(n)
+    for side, name in ((0, "us"), (1, "them")):
+        cols_side = np.flatnonzero(team == side)
+        d = np.where(np.isnan(dist[:, cols_side]), np.inf, dist[:, cols_side])
+        nearest = cols_side[np.argmin(d, axis=1)]
+        found = np.isfinite(d.min(axis=1))
+        rel = np.linalg.norm(ball_v - players_v[rows_, nearest], axis=1)
+        cols["comove_" + name] = np.where(found, rel, np.nan)
+        opp = np.flatnonzero(team != side)
+        gap = np.sqrt(np.square(players[:, opp] - players[rows_, nearest][:, None, :]).sum(-1))
+        cols["pressed_" + name] = np.where(found, (gap < PRESS_M).sum(axis=1), np.nan)
+
+    for w in LONG_WINDOWS_S:
+        frames = int(w * FPS)
+        for direction, tag in ((-1, "past"), (1, "next")):
+            cols["near_us_{}{:g}".format(tag, w)] = _rolling_mean(near_us, frames, direction)
 
     names = sorted(cols)
     matrix = np.full((n, len(names)), np.nan, dtype=np.float32)

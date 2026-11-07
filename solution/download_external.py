@@ -1,14 +1,14 @@
 """Fetch the external training matches, convert each one, delete the raw download.
 
-    python -m solution.download_external            # everything in MATCHES not yet converted
+    python -m solution.download_external            # the IDSSE matches not yet converted
     python -m solution.download_external --list     # what is converted, and its size
 
 One match at a time: download -> convert to data/cache/ext_*.npz -> delete the raw files. Peak
 extra disk is one raw match (~400 MB for IDSSE); what stays is ~30 MB per match.
 
 MATCHES is deliberately a subset (decided 2026-11-07 to keep the download near 1.9 GB): 4 of the
-7 IDSSE matches, two per division, and 5 of the 10 SkillCorner matches. The rest are listed
-commented out -- add them back if the learning curve says more data still helps.
+7 IDSSE matches, two per division. The other three are listed commented out; the learning
+curve without SkillCorner is flat from 4 to 6 training matches, so they were not needed.
 """
 
 import argparse
@@ -31,9 +31,10 @@ MATCHES = {
         # ("DFL-COM-000002", "J03WPY"), ("DFL-COM-000002", "J03WQQ"),
         # ("DFL-COM-000002", "J03WR9"),
     ],
+    # SkillCorner was tried and dropped: training without it is better on every held-out match
+    # (solution/model.py, SOURCES). Kept fetchable with --skillcorner to rerun that experiment.
     "sc": [
         "1874553", "1886347", "1899585", "1925299", "1927964",
-        # "1953632", and the other four listed in SkillCorner's data/matches.json
     ],
 }
 
@@ -90,6 +91,8 @@ def converted():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--list", action="store_true")
+    parser.add_argument("--skillcorner", action="store_true",
+                        help="also fetch SkillCorner (only for rerunning experiments)")
     args = parser.parse_args()
 
     if not args.list:
@@ -98,7 +101,7 @@ if __name__ == "__main__":
         for competition, match in MATCHES["idsse"]:
             print("idsse {} ...".format(match), flush=True)
             get_idsse(competition, match)
-        for match in MATCHES["sc"]:
+        for match in (MATCHES["sc"] if args.skillcorner else []):
             print("sc {} ...".format(match), flush=True)
             get_skillcorner(match)
 

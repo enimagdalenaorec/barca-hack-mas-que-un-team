@@ -15,25 +15,40 @@ import numpy as np
 
 # Params
 EPS = 1e-4  # keeps log() finite for a model that is (over)confident
-# Held-out mean spellF1 over 7 labelled training matches (python -m solution.model --evaluate):
-#   cost  2: 0.544   4: 0.568   6: 0.568   8: 0.568   10: 0.567   14: 0.559   20: 0.548
-# Flat from 4 to 10; 6 sits in the middle of the plateau.
-SWITCH_COST = 6.0
+# Held-out mean spellF1 over 7 labelled training matches, final model
+# (python -m solution.model --evaluate):
+#   cost 2: 0.592   4: 0.630   6: 0.642   8: 0.643   10: 0.645   14: 0.648   20: 0.641   30: 0.625
+# A plateau from 6 to 20; 10 sits in its middle rather than on its noisiest point.
+SWITCH_COST = 10.0
 
 
 def viterbi(p_home, switch_cost):
-    """0 = home / 1 = away for each frame of one live stretch. NaN probabilities count as 0.5."""
+    """0 = home / 1 = away for each frame of one live stretch. NaN probabilities count as 0.5.
+
+    switch_cost is a number, or one number per frame (the cost of switching INTO that frame).
+    Plain Python floats in the loop: with two states, numpy's per-call overhead would dominate.
+    """
     p = np.clip(np.nan_to_num(p_home, nan=0.5), EPS, 1 - EPS)
-    emit = np.stack([np.log(p), np.log(1 - p)], axis=1)
-    n = len(p)
-    back = np.zeros((n, 2), dtype=np.int8)
-    score = emit[0].copy()
+    log_h, log_a = np.log(p).tolist(), np.log(1 - p).tolist()
+    costs = (np.broadcast_to(np.asarray(switch_cost, dtype=float), p.shape)).tolist()
+    n = len(log_h)
+    back = bytearray(2 * n)  # back[2t + s] = previous state on the best path into state s at t
+    h, a = log_h[0], log_a[0]
     for t in range(1, n):
-        stay, cross = score, score[::-1] - switch_cost
-        back[t] = np.where(stay >= cross, [0, 1], [1, 0])
-        score = np.maximum(stay, cross) + emit[t]
+        c = costs[t]
+        if h >= a - c:
+            nh, bh = h, 0
+        else:
+            nh, bh = a - c, 1
+        if a >= h - c:
+            na, ba = a, 1
+        else:
+            na, ba = h - c, 0
+        h, a = nh + log_h[t], na + log_a[t]
+        back[2 * t], back[2 * t + 1] = bh, ba
     path = np.empty(n, dtype=np.int8)
-    path[-1] = int(np.argmax(score))
-    for t in range(n - 1, 0, -1):
-        path[t - 1] = back[t, path[t]]
+    state = 0 if h >= a else 1
+    for t in range(n - 1, -1, -1):
+        path[t] = state
+        state = back[2 * t + state]
     return path

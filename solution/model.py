@@ -40,15 +40,22 @@ MODEL_PATH = os.path.join(DATA_DIR, "cache", "model.pkl")
 SUBSAMPLE = 5          # train on every 5th live frame; neighbours are nearly identical
 SWITCH_COSTS = (2, 4, 6, 8, 10, 14, 20, 30)  # the chosen one lives in decode.SWITCH_COST
 BASELINE_WINDOW = 50
-GBM = dict(max_iter=300, learning_rate=0.05, max_leaf_nodes=31, min_samples_leaf=200,
+# Chosen in solution/experiments.py (combo): held-out spellF1 0.645 against 0.626 for
+# 300 trees / 31 leaves / lr 0.05 on the same training matches, better on 7 of 7.
+GBM = dict(max_iter=600, learning_rate=0.1, max_leaf_nodes=63, min_samples_leaf=200,
            l2_regularization=1.0, random_state=0)
+# SkillCorner trains nothing: leaving it out raised held-out spellF1 from 0.578 to 0.626, better
+# on 7 of 7 (solution/experiments.py, mix). Its labels come from SkillCorner's own software and
+# its tracking from a broadcast feed at 10 fps; both are further from our target than the rest.
+SOURCES = ("idsse",)
 
 
 def training_matches():
-    """[(name, arrays)] for every match we can train on."""
+    """[(name, arrays)] for every match we train on: Metrica + the sources in SOURCES."""
     out = [("metrica{}".format(n), sample_games.load(n)) for n in sample_games.GAMES]
     for source, match in download_external.converted():
-        out.append(("{}_{}".format(source, match), external_games.load(source, match)))
+        if source in SOURCES:
+            out.append(("{}_{}".format(source, match), external_games.load(source, match)))
     return out
 
 
