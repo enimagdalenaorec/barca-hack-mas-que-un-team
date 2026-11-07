@@ -1,13 +1,19 @@
 """Tracking in, submission out. The one command that regenerates our file.
 
-    python -m solution.pipeline                       # -> evaluation/results/deadball_smooth50.csv
-    python -m solution.pipeline --window 50 --name my_entry
+    python -m solution.pipeline                     # -> evaluation/results/model_viterbi.csv
+    python -m solution.pipeline --method rule       # -> evaluation/results/deadball_smooth50.csv
 
 Two decisions, made in this order:
 
   1. Alive or dead, per frame -- solution/dead_ball.py.
-  2. Which team, on alive frames only -- for now the baseline's rule (the team of the tracked
-     player nearest the ball) with a majority vote, but the vote never crosses a stoppage.
+  2. Which team, on alive frames only, never looking across a stoppage:
+       model  (default) the trained model's P(home) per frame (solution/model.py), smoothed into
+              possessions by Viterbi with a switching cost (solution/decode.py). Needs the
+              training matches: python -m solution.sample_games, then
+              python -m solution.download_external. Trains on first use, then reuses
+              data/cache/model.pkl.
+       rule   the published baseline's rule -- the team of the tracked player nearest the ball
+              -- with a +/-50-frame majority vote. Kept for comparison.
 
 Why the order matters. The published baseline smooths everything at once, so near the edge of a
 stoppage the visible-ball frames outvote the dead ones: every stoppage shrinks by the window at
@@ -78,6 +84,15 @@ def build(arrays, runs, window=WINDOW):
     return labels
 
 
+def build_model(arrays, runs):
+    """Label array from the trained model + Viterbi. Imported lazily: needs scikit-learn."""
+    from solution import decode, model
+    import possession_metrics as pm
+    p = model.p_home(model.load_or_train(), arrays, runs)
+    codes = model.labels_from(p, arrays, runs, decode.SWITCH_COST)
+    return np.array(pm.LABELS, dtype="<U1")[codes]
+
+
 def write(path, labels):
     with open(path, "w") as handle:
         handle.write("frame,label\n")
@@ -87,11 +102,17 @@ def write(path, labels):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--window", type=int, default=WINDOW)
+    parser.add_argument("--method", choices=("model", "rule"), default="model")
+    parser.add_argument("--window", type=int, default=WINDOW, help="rule method only")
     parser.add_argument("--name", default=None, help="file name on the board, without .csv")
     args = parser.parse_args()
 
-    labels = build(tracking.load(GAME), graded_runs(GAME), args.window)
-    name = args.name or "deadball_smooth{}".format(args.window)
+    arrays, runs = tracking.load(GAME), graded_runs(GAME)
+    if args.method == "model":
+        labels = build_model(arrays, runs)
+        name = args.name or "model_viterbi"
+    else:
+        labels = build(arrays, runs, args.window)
+        name = args.name or "deadball_smooth{}".format(args.window)
     path = write(os.path.join(RESULTS_DIR, name + ".csv"), labels)
     print("wrote {}".format(os.path.relpath(path, ROOT)))

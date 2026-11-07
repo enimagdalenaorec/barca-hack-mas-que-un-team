@@ -15,6 +15,7 @@ either, plus the answer key we build from the events:
     runs   [(start, stop)]   half-open spans from each kickoff to the last event of that half,
                              the equivalent of the competition's graded halves
     dead   (N,) bool         True where the ball is out of play
+    owner  (N,) int8         0 home, 1 away, -1 unknown (dead, or before the first control event)
 
 How "dead" is derived: every restart -- a SET PIECE (kick-off, throw-in, corner, free kick,
 penalty) or a goal kick -- ends a stoppage, and the stoppage began when the last event before the
@@ -42,7 +43,7 @@ from games import DATA_DIR  # noqa: E402
 # Params
 SAMPLE_DIR = os.path.join(DATA_DIR, "sample")
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 FPS = 25
 PITCH = (105.0, 68.0)  # README: both CSV games are 105 x 68 m; game 3's metadata says the same
 GAMES = (1, 2, 3)
@@ -76,6 +77,7 @@ def _read_csv_game(n):
 
     events = pd.read_csv(os.path.join(_folder(n), "Sample_Game_{}_RawEventsData.csv".format(n)))
     events = [{"type": row["Type"], "subtype": str(row["Subtype"]) if pd.notna(row["Subtype"]) else "",
+               "team": {"Home": 0, "Away": 1}.get(row["Team"], -1),
                "period": int(row["Period"]),
                "start": int(row["Start Frame"]), "end": int(row["End Frame"])}
               for _, row in events.iterrows()]
@@ -130,7 +132,9 @@ def _read_epts_game(n):
             return ""
         return s["name"] if isinstance(s, dict) else "-".join(t["name"] for t in s)
 
-    events = [{"type": e["type"]["name"], "subtype": subtype(e), "period": int(e["period"]),
+    events = [{"type": e["type"]["name"], "subtype": subtype(e),
+               "team": team_ids.index(e["team"]["id"]) if e.get("team") else -1,
+               "period": int(e["period"]),
                "start": int(e["start"]["frame"]), "end": int(e["end"]["frame"] or 0)}
               for e in raw]
     # No period column in the tracking: a frame belongs to the half whose events surround it.
@@ -171,6 +175,30 @@ def dead_ball(n_frames, events, runs, index_of):
     return dead
 
 
+# Events that show a team in control of the ball. CHALLENGE (both teams) and BALL OUT / BALL LOST
+# (the team that just lost it) never hand possession to anyone -- CHALLENGE.md: a loose or
+# contested ball stays with the last team that had it, until the other side gains control.
+CONTROL_EVENTS = ("SET PIECE", "PASS", "CARRY", "SHOT", "RECOVERY")
+
+
+def owner_labels(n_frames, events, runs, index_of, dead):
+    """0 home / 1 away / -1 unknown per frame: the team of the latest control event.
+
+    Unknown on dead frames (the challenge asks no dead-ball owner) and before a half's first
+    control event.
+    """
+    owner = np.full(n_frames, -1, dtype=np.int8)
+    control = sorted((e for e in events if e["type"] in CONTROL_EVENTS and e["team"] >= 0),
+                     key=lambda e: e["start"])
+    for a, b in runs:
+        inside = [e for e in control if a <= index_of(e["start"]) < b]
+        for event, following in zip(inside, inside[1:] + [None]):
+            stop = index_of(following["start"]) if following else b
+            owner[index_of(event["start"]):stop] = event["team"]
+    owner[dead] = -1
+    return owner
+
+
 def build(n):
     frames, periods, players, ball, slot_team, events = (
         _read_csv_game(n) if n in (1, 2) else _read_epts_game(n))
@@ -192,6 +220,7 @@ def build(n):
     scale = np.array(PITCH)
     players_xy = (players * scale).astype(np.float32)
     ball_xy = (ball * scale).astype(np.float32)
+    dead = dead_ball(len(frames), events, runs, index_of)
     return {
         "ball_xy": ball_xy,
         "ball_speed": _speeds(ball_xy),
@@ -201,7 +230,9 @@ def build(n):
         "slot_team": slot_team,
         "pitch": scale.astype(np.float32),
         "runs": np.array(runs, dtype=np.int64),
-        "dead": dead_ball(len(frames), events, runs, index_of),
+        "dead": dead,
+        "owner": owner_labels(len(frames), events, runs, index_of, dead),
+        "has_dead": np.array(1),
         "version": np.array(CACHE_VERSION),
     }
 
