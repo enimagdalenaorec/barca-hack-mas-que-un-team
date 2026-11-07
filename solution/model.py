@@ -197,20 +197,32 @@ def learning_curve(matches, sizes=(3, 6, 9, 11), seed=0):
     return curve
 
 
+def fingerprint(matches):
+    """Everything the saved model depends on. A saved model with another fingerprint is stale."""
+    names = features.compute(matches[0][1], matches[0][1]["runs"][:1])[0]
+    return {"features": names, "gbm": GBM, "matches": [name for name, _ in matches],
+            "augment": {k: getattr(augment, k) for k in dir(augment) if k.isupper()},
+            "subsample": SUBSAMPLE}
+
+
 def train_and_save(matches=None):
-    model = fit(matches or training_matches())
+    matches = matches or training_matches()
+    model = fit(matches)
     with open(MODEL_PATH, "wb") as handle:
-        pickle.dump(model, handle)
+        pickle.dump({"model": model, "fingerprint": fingerprint(matches)}, handle)
     return model
 
 
 def load_or_train():
-    """The saved model, training it first if there is none. Training is seeded, so a fresh
-    clone with the same data rebuilds the same model."""
+    """The saved model if it was trained exactly as the code now would, else a fresh one.
+    Training is seeded, so a fresh clone with the same data rebuilds the same model."""
+    matches = training_matches()
     if os.path.isfile(MODEL_PATH):
         with open(MODEL_PATH, "rb") as handle:
-            return pickle.load(handle)
-    return train_and_save()
+            saved = pickle.load(handle)
+        if isinstance(saved, dict) and saved.get("fingerprint") == fingerprint(matches):
+            return saved["model"]
+    return train_and_save(matches)
 
 
 if __name__ == "__main__":

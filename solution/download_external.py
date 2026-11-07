@@ -1,10 +1,11 @@
-"""Fetch the external training matches, convert each one, delete the raw download.
+"""Fetch every training match, convert each one, delete the raw download.
 
-    python -m solution.download_external            # the IDSSE matches not yet converted
+    python -m solution.download_external            # Metrica + IDSSE, whatever is missing
     python -m solution.download_external --list     # what is converted, and its size
 
 One match at a time: download -> convert to data/cache/ext_*.npz -> delete the raw files. Peak
 extra disk is one raw match (~400 MB for IDSSE); what stays is ~30 MB per match.
+About 1.7 GB is downloaded in all: Metrica ~250 MB, IDSSE ~1.5 GB.
 
 MATCHES is deliberately a subset (decided 2026-11-07 to keep the download near 1.9 GB): 4 of the
 7 IDSSE matches, two per division. The other three are listed commented out; the learning
@@ -21,6 +22,14 @@ sys.path.insert(0, ROOT)
 from solution import external_games as ext  # noqa: E402
 
 # Params
+METRICA_URL = "https://raw.githubusercontent.com/metrica-sports/sample-data/master/data/"
+METRICA_FILES = {
+    1: ["Sample_Game_1_RawEventsData.csv", "Sample_Game_1_RawTrackingData_Home_Team.csv",
+        "Sample_Game_1_RawTrackingData_Away_Team.csv"],
+    2: ["Sample_Game_2_RawEventsData.csv", "Sample_Game_2_RawTrackingData_Home_Team.csv",
+        "Sample_Game_2_RawTrackingData_Away_Team.csv"],
+    3: ["Sample_Game_3_events.json", "Sample_Game_3_metadata.xml", "Sample_Game_3_tracking.txt"],
+}
 IDSSE_URL = "https://huggingface.co/datasets/pysport/idsse-data/resolve/main/"
 SC_RAW = "https://raw.githubusercontent.com/SkillCorner/opendata/master/data/matches/"
 SC_LFS = "https://media.githubusercontent.com/media/SkillCorner/opendata/master/data/matches/"
@@ -43,6 +52,23 @@ def fetch(url, path):
     """curl, because it follows the LFS / CDN redirects and shows a clear failure."""
     subprocess.run(["curl", "-sfL", "--retry", "3", url, "-o", path], check=True)
     return path
+
+
+def get_metrica(n):
+    """Metrica sample game n: download into data/sample/, convert (solution/sample_games.py),
+    then delete the raw files like every other source."""
+    from solution import sample_games
+    if os.path.isfile(sample_games.cache_path(n)):
+        return
+    folder = os.path.join(sample_games.SAMPLE_DIR, "Sample_Game_{}".format(n))
+    os.makedirs(folder, exist_ok=True)
+    paths = [fetch(METRICA_URL + "Sample_Game_{}/{}".format(n, f), os.path.join(folder, f))
+             for f in METRICA_FILES[n]]
+    try:
+        sample_games.load(n)
+    finally:
+        for path in paths:
+            os.remove(path)
 
 
 def get_idsse(competition, match):
@@ -98,6 +124,9 @@ if __name__ == "__main__":
     if not args.list:
         os.makedirs(ext.RAW_DIR, exist_ok=True)
         os.makedirs(ext.CACHE_DIR, exist_ok=True)
+        for n in METRICA_FILES:
+            print("metrica {} ...".format(n), flush=True)
+            get_metrica(n)
         for competition, match in MATCHES["idsse"]:
             print("idsse {} ...".format(match), flush=True)
             get_idsse(competition, match)

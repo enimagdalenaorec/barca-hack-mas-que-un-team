@@ -2,7 +2,8 @@
 
 These are OTHER games, so RULES.md allows tuning on them freely. They come from
 https://github.com/metrica-sports/sample-data (no licence file; the README asks for responsible use
-and acknowledgement, which the technical document gives). Download them into data/sample/:
+and acknowledgement, which the technical document gives). python -m solution.download_external
+fetches them into data/sample/, converts them and deletes the raw files:
 
     data/sample/Sample_Game_1/Sample_Game_1_RawEventsData.csv
     data/sample/Sample_Game_1/Sample_Game_1_RawTrackingData_{Home,Away}_Team.csv
@@ -237,9 +238,13 @@ def build(n):
     }
 
 
+def cache_path(n):
+    return os.path.join(CACHE_DIR, "sample_game_{}_v{}.npz".format(n, CACHE_VERSION))
+
+
 def load(n, force=False):
     """One sample game, from the cache if it exists."""
-    path = os.path.join(CACHE_DIR, "sample_game_{}_v{}.npz".format(n, CACHE_VERSION))
+    path = cache_path(n)
     if not force and os.path.isfile(path):
         with np.load(path) as cached:
             arrays = {key: cached[key] for key in cached.files}

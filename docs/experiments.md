@@ -87,3 +87,55 @@ No SkillCorner; boosting 600 trees / 63 leaves / lr 0.1; all 51 features; switch
 
 **Held-out spellF1 0.645, macroF1 0.904** — against 0.449 / 0.851 for the published baseline's rule
 on the same matches, and 0.568 for the first model. Better than the first model on 7 of 7 matches.
+
+# Phase 4: robustness on the competition match, and more ideas
+
+## Checks on the competition match (no ground truth used)
+- **Kick-off bug found and fixed.** FAQ.md: the 2,934 graded frames before the second-half kick-off
+  are all dead. Only 18% of them were `D`: the ball is tracked while it is placed on the centre
+  spot, so "ball missing ≥ 2 s" called them live. New rule in `solution/dead_ball.py`: nothing is
+  live before a half's kick-off, which is detected in the tracking (≥ 85% of players in their own
+  half for 3 s, then the formation breaks with the ball inside the centre circle, and nobody
+  sprinted before it). Detected at frame 113,750 against the documented 113,742; on the 14
+  training halves it fires only before one retaken kick-off. Two refinements came from failures
+  on the training matches: the centre-circle condition, and the "calm before" condition, which
+  keeps a kick-off after an early goal from turning 2.5 minutes of real play dead.
+- **Stability.** Switch cost 6 or 14 instead of 10 changes 0.3% / 0.2% of graded frames;
+  dead-ball threshold 1–3 s instead of 2 s changes none.
+- **Tracking duplicates** (more than 22 tracked objects on 1.6% of live frames) do not cause extra
+  team switches (1.3 per 1000 frames there vs 2.6 elsewhere).
+- **Feature drift**, live frames, competition match vs augmented training matches: every feature
+  within a third of the training interquartile range of its median, except opponents pressing
+  the nearest player (median 0 vs 1) — a feature group that was neutral in experiment 3.
+- **Hypothesis tested and rejected:** that the tracker puts goalkeepers (different shirt colour) in
+  the wrong team. Both keepers' slots are labelled correctly and spend >80% of the time in their
+  own penalty box.
+
+## 8. Restart features (the laws decide who restarts)
+Nine per-live-stretch features: who was closer to the ball in the last second before the stoppage,
+where the ball was last seen then, stoppage length, restart position, who was closer in the first
+second, time since the restart and until the next stoppage.
+
+| variant | spellF1 | wins | first possession after a stoppage right |
+|---|---|---|---|
+| without | 0.645 | ref | 96.8% of 761 |
+| with | 0.647 | 4/7 | 96.8% of 761 |
+
+**No gain — dropped.** The restarting team is already right 97% of the time from who is nearest.
+
+## 9. Ensembles and source weights (with restart features, reference 0.647)
+Ensemble of 5 models, one per interleaved fifth of the frames: 0.646 (3/7). IDSSE counted double:
+0.638 (1/7). Metrica counted double: 0.645 (3/7). **No gain.**
+
+## 10. Self-training on the unlabelled held-out match (simulating our match)
+Retrain twice on the model's own confident, smoothed guesses about the held-out match:
+
+| confidence / weight | 0.7 / 0.5 | 0.7 / 1.0 | 0.85 / 0.5 | 0.85 / 1.0 |
+|---|---|---|---|---|
+| spellF1 (ref 0.647) | 0.641 | 0.643 | 0.635 | 0.635 |
+
+**Worse every time — dropped.** The model reinforces its own mistakes.
+
+## 11. Smart Tagging hints at restarts — not run
+Restart team is already 97% right on the training matches, and only the competition match has
+Smart Tagging, so the idea could not be tested honestly. Left out.

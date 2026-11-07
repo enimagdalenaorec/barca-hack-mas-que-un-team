@@ -175,6 +175,7 @@ def compute(arrays, runs, swap=False):
         for direction, tag in ((-1, "past"), (1, "next")):
             cols["near_us_{}{:g}".format(tag, w)] = _rolling_mean(near_us, frames, direction)
 
+
     names = sorted(cols)
     matrix = np.full((n, len(names)), np.nan, dtype=np.float32)
     inside = np.zeros(n, dtype=bool)

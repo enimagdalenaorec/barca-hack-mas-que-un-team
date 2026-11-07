@@ -62,9 +62,10 @@ def held_out(name, arrays):
     return _HELD[name]
 
 
-def train_rows(name, arrays, aug=None):
-    """(X, y, names) training rows; `aug` overrides augment.py params for this call."""
-    key = (name, tuple(sorted((aug or {}).items())))
+def train_rows(name, arrays, aug=None, offset=0):
+    """(X, y, names) training rows; `aug` overrides augment.py params for this call; `offset`
+    picks which of the SUBSAMPLE interleaved frame sets to use."""
+    key = (name, tuple(sorted((aug or {}).items())), offset)
     if key not in _ROWS:
         saved = {k: getattr(augment, k) for k in (aug or {})}
         for k, v in (aug or {}).items():
@@ -78,7 +79,7 @@ def train_rows(name, arrays, aug=None):
         keep = owner >= 0
         if int(arrays["has_dead"]):
             keep &= ~arrays["dead"]
-        idx = np.flatnonzero(keep)[::M.SUBSAMPLE]
+        idx = np.flatnonzero(keep)[offset::M.SUBSAMPLE]
         xs, ys = [], []
         for swap in (False, True):
             names, X = features.compute(aug_arrays, arrays["runs"], swap=swap)
@@ -93,24 +94,28 @@ def default_model():
 
 
 def predictions(columns=None, make_model=default_model, use=lambda name: True,
-                weight=lambda name: 1.0, aug=None):
-    """{held-out name: P(home) per frame} for one configuration."""
+                weight=lambda name: 1.0, aug=None, offsets=(0,)):
+    """{held-out name: P(home) per frame} for one configuration. Several `offsets` train one
+    model per interleaved frame set and average them (an ensemble over all frames)."""
     out = {}
     for name, arrays in labelled():
         train = [(n, a) for n, a in matches() if n != name and use(n)]
-        parts = [train_rows(n, a, aug) for n, a in train]
-        names = parts[0][2]
-        cols = [names.index(c) for c in (columns or names)]
-        X = np.concatenate([p[0][:, cols] for p in parts])
-        y = np.concatenate([p[1] for p in parts])
-        w = np.concatenate([np.full(len(p[1]), weight(n)) for p, (n, _) in zip(parts, train)])
-        clf = make_model()
-        clf = clf.fit(X, y) if np.all(w == 1) else clf.fit(X, y, sample_weight=w)
         h = held_out(name, arrays)
-        p = np.full(len(h["X0"]), np.nan)
         inside = ~np.isnan(h["X0"]).all(axis=1)
-        p[inside] = 0.5 * (clf.predict_proba(h["X0"][inside][:, cols])[:, 1]
-                           + 1 - clf.predict_proba(h["X1"][inside][:, cols])[:, 1])
+        p = np.zeros(len(h["X0"]))
+        for offset in offsets:
+            parts = [train_rows(n, a, aug, offset) for n, a in train]
+            names = parts[0][2]
+            cols = [names.index(c) for c in (columns or names)]
+            X = np.concatenate([q[0][:, cols] for q in parts])
+            y = np.concatenate([q[1] for q in parts])
+            w = np.concatenate([np.full(len(q[1]), weight(n)) for q, (n, _) in zip(parts, train)])
+            clf = make_model()
+            clf = clf.fit(X, y) if np.all(w == 1) else clf.fit(X, y, sample_weight=w)
+            p[inside] += 0.5 * (clf.predict_proba(h["X0"][inside][:, cols])[:, 1]
+                                + 1 - clf.predict_proba(h["X1"][inside][:, cols])[:, 1])
+        p /= len(offsets)
+        p[~inside] = np.nan
         out[name] = p
     return out
 
@@ -251,7 +256,22 @@ GROUPS = {
     "ball flight (new)": ("flight",),
     "control (new)": ("comove_", "pressed_"),
     "long context (new)": ("near_us_past5", "near_us_next5", "near_us_past10", "near_us_next10"),
+    "restart": ("since_restart_s", "until_stop_s", "stop_len_s", "before_stop_", "restart_"),
 }
+
+
+def exp_restart():
+    names = held_out(*labelled()[0])["names"]
+    restart = [f for f in names if group_of(f) == "restart"]
+    without = [f for f in names if group_of(f) != "restart"]
+    no_press = [f for f in names if not f.startswith("pressed_")]
+    variants = {
+        "without restart features": score_predictions(predictions(columns=without)),
+        "with restart features ({})".format(len(restart)): score_predictions(predictions()),
+        "with restart, without pressing": score_predictions(predictions(columns=no_press)),
+    }
+    table("restart features (football rules of who restarts)", variants,
+          "without restart features")
 
 
 def group_of(feature):
@@ -473,6 +493,78 @@ def predictions_for(name, arrays, train):
     return {name: p}
 
 
+def restart_accuracy(p):
+    """Share of live stretches whose first possession has the right team (vs the truth)."""
+    hits = total = 0
+    for name, probs in p.items():
+        arrays = dict(labelled())[name]
+        gt = held_out(name, arrays)["gt"]
+        codes = decode_match(name, probs)
+        live = np.isin(codes, (pm.H, pm.A))
+        for a, b in dead_ball.stretches(live, arrays["runs"]):
+            truth = gt[a:min(b, a + 50)]
+            truth = truth[np.isin(truth, (pm.H, pm.A))]
+            if len(truth):
+                total += 1
+                hits += int(codes[a] == np.bincount(truth).argmax())
+    return hits / max(total, 1), total
+
+
+def exp_round2():
+    names = held_out(*labelled()[0])["names"]
+    without = [f for f in names if group_of(f) != "restart"]
+    p_with, p_without = predictions(), predictions(columns=without)
+    for label, p in (("without restart features", p_without), ("with restart features", p_with)):
+        acc, n = restart_accuracy(p)
+        print("  first possession after a stoppage right: {:.3f} of {} ({})".format(acc, n, label))
+    variants = {"single model (ref)": score_predictions(p_with),
+                "ensemble of 5 (all frames)": score_predictions(
+                    predictions(offsets=(0, 1, 2, 3, 4))),
+                "IDSSE counted double": score_predictions(
+                    predictions(weight=lambda n: 2.0 if n.startswith("idsse") else 1.0)),
+                "Metrica counted double": score_predictions(
+                    predictions(weight=lambda n: 2.0 if n.startswith("metrica") else 1.0))}
+    table("round 2 -- ensembles and source weights", variants, "single model (ref)")
+
+
+def exp_selftrain(conf_levels=(0.7, 0.85), weights=(0.5, 1.0), rounds=2):
+    """Self-training, simulated honestly: each held-out match is treated like our match --
+    unlabelled -- and the model retrains on its own confident, smoothed guesses about it."""
+    base = predictions()
+    variants = {"no self-training (ref)": score_predictions(base)}
+    for conf in conf_levels:
+        for w in weights:
+            out = {}
+            for name, arrays in labelled():
+                train = [(n, a) for n, a in matches() if n != name]
+                parts = [train_rows(n, a) for n, a in train]
+                X = np.concatenate([q[0] for q in parts])
+                y = np.concatenate([q[1] for q in parts])
+                h = held_out(name, arrays)
+                inside = ~np.isnan(h["X0"]).all(axis=1)
+                p = base[name]
+                for _ in range(rounds):
+                    codes = decode_match(name, p)
+                    side = np.where(codes == pm.H, 0, np.where(codes == pm.A, 1, -1))
+                    sure = (side >= 0) & inside & (np.maximum(p, 1 - p) >= conf) & \
+                           ((p >= 0.5) == (side == 0))
+                    idx = np.flatnonzero(sure)[::M.SUBSAMPLE]
+                    Xp = np.concatenate([h["X0"][idx], h["X1"][idx]])
+                    yp = np.concatenate([(side[idx] == 0), (side[idx] == 1)]).astype(np.int8)
+                    clf = default_model().fit(
+                        np.concatenate([X, Xp]), np.concatenate([y, yp]),
+                        sample_weight=np.concatenate([np.ones(len(y)), np.full(len(yp), w)]))
+                    p = np.full(len(h["X0"]), np.nan)
+                    p[inside] = 0.5 * (clf.predict_proba(h["X0"][inside])[:, 1]
+                                       + 1 - clf.predict_proba(h["X1"][inside])[:, 1])
+                out[name] = p
+            variants["self-train: confidence {} weight {}, {} rounds".format(conf, w, rounds)] = \
+                score_predictions(out)
+            print("  self-training conf {} w {} done".format(conf, w), flush=True)
+    table("4.4 -- self-training on the (unlabelled) held-out match", variants,
+          "no self-training (ref)")
+
+
 def exp_budget(p):
     """Where are the remaining points? Replace one stage at a time with the true answer."""
     ours, oracle_dead, oracle_team, oracle_both = {}, {}, {}, {}
@@ -512,6 +604,12 @@ if __name__ == "__main__":
         exp_models()
     if "augment" in which:
         exp_augment()
+    if "restart" in which:
+        exp_restart()
+    if "round2" in which:
+        exp_round2()
+    if "selftrain" in which:
+        exp_selftrain()
     if "combo" in which:
         exp_combo()
     if "curve" in which:
