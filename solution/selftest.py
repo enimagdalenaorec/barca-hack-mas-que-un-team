@@ -10,7 +10,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from solution import dead_ball, decode, model  # noqa: E402
+from solution import dead_ball, dead_features, decode, model  # noqa: E402
 
 FPS = 25
 LIVE_BLOCK, DEAD_BLOCK = 400, 150
@@ -84,6 +84,19 @@ def test_labels_from3_reproduces_clear_truth():
     p_dead = np.where(arrays["dead"], .95, .05)
     codes = model.labels_from3(p_home, p_dead, arrays, arrays["runs"], (10, 8, 8))
     assert (codes == model.truth_codes(arrays)).all()
+
+
+def test_dead_features_shape_and_nan_outside_runs():
+    arrays = synthetic_match(300)
+    names, X = dead_features.compute(arrays, [(50, 250)])
+    assert X.shape == (300, len(names)) and len(names) == 16
+    assert np.isnan(X[:50]).all() and np.isnan(X[250:]).all()
+
+
+def test_dead_features_still_players_read_as_still():
+    arrays = synthetic_match(300, moving=False)
+    names, X = dead_features.compute(arrays, [(0, 300)])
+    assert np.nanmedian(X[:, names.index("still_share")]) > 0.9
 
 
 def main():
