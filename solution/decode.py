@@ -20,6 +20,10 @@ EPS = 1e-4  # keeps log() finite for a model that is (over)confident
 #   cost 2: 0.592   4: 0.630   6: 0.642   8: 0.643   10: 0.645   14: 0.648   20: 0.641   30: 0.625
 # A plateau from 6 to 20; 10 sits in its middle rather than on its noisiest point.
 SWITCH_COST = 10.0
+# Three-state decoder (viterbi3): leaving play for a stoppage, and coming back. Set in
+# solution/experiments.py (dead).
+STOP_COST = 8.0
+RESTART_COST = 8.0
 
 
 def viterbi(p_home, switch_cost):
@@ -51,4 +55,48 @@ def viterbi(p_home, switch_cost):
     for t in range(n - 1, -1, -1):
         path[t] = state
         state = back[2 * t + state]
+    return path
+
+
+def viterbi3(p_dead, p_home, forced_dead, switch_cost, stop_cost, restart_cost):
+    """0 = home / 1 = away / 2 = dead for each frame of one run. NaN probabilities count as 0.5.
+
+    Emissions: dead log p_dead; home log(1 - p_dead) + log p_home; away log(1 - p_dead) +
+    log(1 - p_home). Frames in forced_dead can only be dead. Costs: home <-> away switch_cost,
+    home/away -> dead stop_cost, dead -> home/away restart_cost; staying is free.
+    """
+    n = len(p_dead)
+    if n == 0:
+        return np.empty(0, dtype=np.int8)
+    pd = np.clip(np.nan_to_num(np.asarray(p_dead, dtype=float), nan=0.5), EPS, 1 - EPS)
+    ph = np.clip(np.nan_to_num(np.asarray(p_home, dtype=float), nan=0.5), EPS, 1 - EPS)
+    live = np.where(np.asarray(forced_dead, dtype=bool), -np.inf, np.log(1 - pd))
+    e_h, e_a = (live + np.log(ph)).tolist(), (live + np.log(1 - ph)).tolist()
+    e_d = np.log(pd).tolist()
+    sw, st, rs = float(switch_cost), float(stop_cost), float(restart_cost)
+    back = bytearray(3 * n)  # back[3t + s] = previous state on the best path into state s at t
+    h, a, d = e_h[0], e_a[0], e_d[0]
+    for t in range(1, n):
+        nh, bh = h, 0
+        if a - sw > nh:
+            nh, bh = a - sw, 1
+        if d - rs > nh:
+            nh, bh = d - rs, 2
+        na, ba = a, 1
+        if h - sw > na:
+            na, ba = h - sw, 0
+        if d - rs > na:
+            na, ba = d - rs, 2
+        nd, bd = d, 2
+        if h - st > nd:
+            nd, bd = h - st, 0
+        if a - st > nd:
+            nd, bd = a - st, 1
+        h, a, d = nh + e_h[t], na + e_a[t], nd + e_d[t]
+        back[3 * t], back[3 * t + 1], back[3 * t + 2] = bh, ba, bd
+    path = np.empty(n, dtype=np.int8)
+    state = int(np.argmax([h, a, d]))
+    for t in range(n - 1, -1, -1):
+        path[t] = state
+        state = back[3 * t + state]
     return path

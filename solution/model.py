@@ -123,6 +123,18 @@ def labels_from(p, arrays, runs, switch_cost):
     return codes
 
 
+def labels_from3(p_home, p_dead, arrays, runs, costs):
+    """Codes H/A/D/X for a whole match: one three-state Viterbi per run (decode.viterbi3), frames
+    before the detected kick-off forced dead. costs = (switch, stop, restart)."""
+    forced = dead_ball.pre_kickoff_mask(arrays, runs)
+    codes = np.full(len(p_home), pm.X, dtype=np.int8)
+    letters = np.array([pm.H, pm.A, pm.D], dtype=np.int8)
+    for start, stop in runs:
+        path = decode.viterbi3(p_dead[start:stop], p_home[start:stop], forced[start:stop], *costs)
+        codes[start:stop] = letters[path]
+    return codes
+
+
 def baseline_codes(arrays, runs):
     """The published baseline's team rule, applied after our dead-ball rule (pipeline.build)."""
     from solution import pipeline

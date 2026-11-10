@@ -130,6 +130,12 @@ def dead_mask(arrays, runs, min_dead_s=MIN_DEAD_S):
     for start, stop in stretches(missing, runs):
         if stop - start >= min_dead_s * FPS:
             dead[start:stop] = True
+    return dead | pre_kickoff_mask(arrays, runs)
+
+
+def pre_kickoff_mask(arrays, runs):
+    """True on [start, kick-off) of each run: nothing is live before a half's kick-off."""
+    mask = np.zeros(len(arrays["ball_xy"]), dtype=bool)
     for start, stop in runs:
-        dead[start:kickoff_frame(arrays, start, stop)] = True
-    return dead
+        mask[start:kickoff_frame(arrays, start, stop)] = True
+    return mask
