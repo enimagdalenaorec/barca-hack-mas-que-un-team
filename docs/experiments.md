@@ -203,3 +203,20 @@ long gaps are at stoppage pace. The model's advantage grows when live-play gaps 
 
 Training the team model under the calibrated regime instead of the default is slightly worse
 everywhere (2 of 7): `AUG_REGIME` stays "default".
+
+## Phase 5 summary
+- Reproducible: training data pinned to fixed revisions; the submission built from scratch with
+  `OMP_NUM_THREADS=1` and with 16 threads is byte-identical (same SHA-256); format validated.
+- Final configuration unchanged: Eni's model + 2 s dead-ball rule + Viterbi, switch cost 10.
+  The learned dead ball (13) is available behind `--dead model`; it did not meet the bar.
+- Public 5 minutes, run once as a correctness check after every choice above was made (not
+  used to choose anything):
+
+| submission | spellF1 | macroF1 | alive/dead F1 | team acc (both alive) | possessions (truth 17) |
+|---|---|---|---|---|---|
+| model_viterbi | 0.506 | 0.682 | 0.893 | 0.920 | 17 |
+| baseline_smooth50 | 0.326 | 0.621 | 0.899 | 0.858 | 26 |
+
+  Teams are not swapped and frames line up (team accuracy 0.92, possession count exact).
+  Alive/dead F1 sits 0.006 under the smoothed baseline: within noise on 1,469 dead frames,
+  not a bug signature.

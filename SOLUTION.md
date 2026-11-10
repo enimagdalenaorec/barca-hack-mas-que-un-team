@@ -20,6 +20,11 @@ kit, unchanged. The approach and every experiment behind it are in
 Held-out score on matches the model never saw: spellF1 **0.645** against **0.449** for the
 published baseline's rule.
 
+Tried and kept as an option, not the default: a learned dead-ball model (`solution/dead_model.py`)
+decoded together with the team in one home / away / dead Viterbi. It wins on the 4 IDSSE matches
+and loses on the 3 Metrica ones, so it missed the promotion bar set before the run
+([docs/experiments.md](docs/experiments.md), 13). `--dead model` switches it on.
+
 ## Reproduce
 
 Python 3.9 to 3.12 (numpy 2.0.2 has no 3.13 wheels), about 2 GB of free disk during the download
@@ -58,7 +63,13 @@ the same model) and writes `evaluation/results/model_viterbi.csv`:
 .venv/bin/python -m solution.diagnostics <csv> ...   # describe submissions without any ground truth
 .venv/bin/python -m solution.timecode <frame>        # where a frame is in the video
 .venv/bin/python -m solution.pipeline --method rule  # the baseline rule with our dead-ball fix
+.venv/bin/python -m solution.pipeline --dead model   # learned dead ball instead of the 2 s rule
+.venv/bin/python -m solution.selftest                # self-checks on synthetic data
+.venv/bin/python -m solution.gap_stats               # aggregate ball-gap statistics of our match
 ```
+
+The training data is pinned to fixed revisions (`solution/download_external.py`), and the
+submission is byte-identical whether the model trains on 1 CPU thread or 16.
 
 ## Data sources
 
