@@ -20,9 +20,10 @@ EPS = 1e-4  # keeps log() finite for a model that is (over)confident
 #   cost 2: 0.592   4: 0.630   6: 0.642   8: 0.643   10: 0.645   14: 0.648   20: 0.641   30: 0.625
 # A plateau from 6 to 20; 10 sits in its middle rather than on its noisiest point.
 SWITCH_COST = 10.0
-# Three-state decoder (viterbi3): leaving play for a stoppage, and coming back. Set in
-# solution/experiments.py (dead).
-STOP_COST = 8.0
+# Three-state decoder (viterbi3, pipeline --dead model): leaving play for a stoppage, and coming
+# back. Best mean held-out spellF1 under the calibrated regime (python -m solution.experiments
+# dead); the grid over {4, 8, 12, 20}^2 is flat, 0.657-0.659.
+STOP_COST = 20.0
 RESTART_COST = 8.0
 
 

@@ -175,3 +175,31 @@ So nearly all of our long gaps are stoppages, and the `calibrated` augmentation 
 than Eni's default: `LIVE_GAP_SHARE` 0.028 (default 0.05), `LIVE_GAP_S` (6.1, 9.2) s (default
 2-15). The held-out yardstick was not flattering the 2 s rule; `harsh` (0.15, 3-30 s, 85% of
 stoppages hidden) is the stress test.
+
+## 13. Learned dead ball vs the 2 s rule (`python -m solution.experiments dead`)
+`solution/dead_model.py` learns P(dead) from 16 mostly player-movement features
+(`solution/dead_features.py`); `decode.viterbi3` decodes home / away / dead in one pass per half,
+frames before the detected kick-off forced dead. Training matches augmented under regime T, the
+held-out match under regime E (default, calibrated from 13a, harsh). Stop / restart costs chosen
+on held-out under E = calibrated, as Eni's switch cost was; the grid is flat (0.657-0.659), best
+(20, 8) for T default.
+
+| held-out E | Eni: T default, rule | T calibrated, rule | T default, model (20, 8) | T calibrated, model (20, 20) |
+|---|---|---|---|---|
+| default | 0.645 / 0.904 | 0.641 / 0.903 (2 of 7) | 0.651 / 0.915 (4 of 7) | 0.647 / 0.912 (4 of 7) |
+| calibrated | 0.656 / 0.910 | 0.650 / 0.909 (2 of 7) | 0.659 / 0.917 (4 of 7) | 0.655 / 0.917 (2 of 7) |
+| harsh | 0.605 / 0.840 | 0.598 / 0.840 (1 of 7) | 0.622 / 0.880 (5 of 7) | 0.612 / 0.868 (4 of 7) |
+
+spellF1 / macroF1, wins of 7 against Eni in brackets.
+
+**Kept the rule.** The promotion rule set before the run (under calibrated: better mean and at
+least 5 of 7 wins; under default: not worse by more than 0.01) fails on wins: the model beats the
+rule on all 4 IDSSE matches and loses on all 3 Metrica ones (by 0.01-0.015 at costs 8 / 8). On
+Metrica the ball tracker's own gaps already mark the stoppages almost perfectly (dead F1
+0.94-0.97, solution/dead_ball.py), and 13a says our match behaves the same way: nearly all of its
+long gaps are at stoppage pace. The model's advantage grows when live-play gaps are common
+(harsh: +0.017, 5 of 7) and it lifts macroF1 by ~0.01 everywhere, so it stays available as
+`python -m solution.pipeline --dead model`.
+
+Training the team model under the calibrated regime instead of the default is slightly worse
+everywhere (2 of 7): `AUG_REGIME` stays "default".

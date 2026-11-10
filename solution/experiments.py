@@ -8,7 +8,8 @@
     python -m solution.experiments augment     # 6: sensitivity to the augmentation guesses
     python -m solution.experiments stacking    # 7: a second model over the first one's guesses
     python -m solution.experiments budget      # where are the remaining points?
-    python -m solution.experiments labels      # 8: training-label granularity vs the public window
+    python -m solution.experiments labels      # 12: training-label granularity vs the public window
+    python -m solution.experiments dead        # 13: dead-ball rule vs learned P(dead)
 
 Each held-out match is one of the 7 with a full H/A/D label (Metrica, IDSSE); the model is
 trained on the other 11 matches every time. Results are the mean over the 7 and, against the
@@ -630,10 +631,76 @@ def exp_labels():
                 source, "mean", *mean))
 
 
+# -- dead ball: rule vs learned P(dead), under realistic ball gaps -----------------------------
+
+DEAD_COSTS = (4, 8, 12, 20)  # stop and restart costs tried for the three-state decoder
+
+
+def exp_dead():
+    """Eni's dead-ball rule vs the learned P(dead) + three-state Viterbi, with the training
+    matches augmented under regime T and the held-out match under regime E.
+
+    The held-out ball gaps are synthetic, so they are scored under three regimes: Eni's default,
+    one calibrated to our match's aggregate gap statistics, and a harsh one. The model's stop and
+    restart costs are chosen on the held-out matches (best mean under E = calibrated), as Eni's
+    switch cost was."""
+    from solution import dead_model
+    t_names, e_names = ("default", "calibrated"), ("default", "calibrated", "harsh")
+    params = {r: augment.regime(r) for r in e_names}
+    pairs = [(stop, restart) for stop in DEAD_COSTS for restart in DEAD_COSTS]
+    res = {}  # (T, "rule" or (stop, restart), E) -> [(spellF1, macroF1)] per held-out match
+    for name, arrays in labelled():
+        train = [(n, a) for n, a in matches() if n != name]
+        gt, runs = M.truth_codes(arrays), arrays["runs"]
+        helds = {e: augment.augment(arrays, M.seed_of(name) + 1, params[e]) for e in e_names}
+        for t in t_names:
+            team, dead_clf = M.fit(train, params[t]), dead_model.fit(train, params[t])
+            for e in e_names:
+                held = helds[e]
+                p = M.p_home(team, held, runs)
+                codes = M.labels_from(p, held, runs, decode.SWITCH_COST)
+                res.setdefault((t, "rule", e), []).append(M.score(gt, codes)[:2])
+                p_dead = dead_model.p_dead(dead_clf, held, runs)
+                for pair in pairs:
+                    codes = M.labels_from3(p, p_dead, held, runs, (decode.SWITCH_COST,) + pair)
+                    res.setdefault((t, pair, e), []).append(M.score(gt, codes)[:2])
+        print("  {:<14} rule {:.3f} / {:.3f} / {:.3f}  model(8, 8) {:.3f} / {:.3f} / {:.3f}"
+              "  (T default; E default / calibrated / harsh)".format(
+                  name, *[res[("default", "rule", e)][-1][0] for e in e_names],
+                  *[res[("default", (8, 8), e)][-1][0] for e in e_names]), flush=True)
+
+    def mean(key):
+        return float(np.mean([r[0] for r in res[key]]))
+
+    print("\nstop x restart cost, mean held-out spellF1 under E = calibrated")
+    best = {}
+    for t in t_names:
+        print("  T {:<11}".format(t) + "".join("  restart {:<3}".format(r) for r in DEAD_COSTS))
+        for stop in DEAD_COSTS:
+            print("    stop {:<6}".format(stop) + "".join(
+                "  {:<11.3f}".format(mean((t, (stop, r), "calibrated"))) for r in DEAD_COSTS))
+        best[t] = max(pairs, key=lambda pair: mean((t, pair, "calibrated")))
+        print("    best {}".format(best[t]))
+
+    rows = [("T default, rule (Eni)", ("default", "rule")),
+            ("T calibrated, rule", ("calibrated", "rule"))]
+    rows += [("T {}, model {}".format(t, best[t]), (t, best[t])) for t in t_names]
+    for e in e_names:
+        ref = res[("default", "rule", e)]
+        print("\nheld-out E = {:<11} spellF1  macroF1  wins of 7 vs Eni".format(e))
+        for label, (t, v) in rows:
+            r = np.array(res[(t, v, e)])
+            wins = sum(a[0] > b[0] for a, b in zip(res[(t, v, e)], ref))
+            print("  {:<30} {:.3f}    {:.3f}    {}".format(label, r[:, 0].mean(), r[:, 1].mean(), wins))
+    return res, best
+
+
 if __name__ == "__main__":
     which = sys.argv[1:] or ["timing", "decoding"]
     if "labels" in which:
         exp_labels()
+    if "dead" in which:
+        exp_dead()
     if "features" in which:
         exp_features()
     if "mix" in which:
