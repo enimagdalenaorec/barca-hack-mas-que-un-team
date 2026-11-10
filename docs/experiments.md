@@ -173,8 +173,21 @@ dead frames and 2.31 m/s on live frames of the 7 labelled matches, 1.14 m/s insi
 
 So nearly all of our long gaps are stoppages, and the `calibrated` augmentation regime is milder
 than Eni's default: `LIVE_GAP_SHARE` 0.028 (default 0.05), `LIVE_GAP_S` (6.1, 9.2) s (default
-2-15). The held-out yardstick was not flattering the 2 s rule; `harsh` (0.15, 3-30 s, 85% of
-stoppages hidden) is the stress test.
+2-15). `harsh` (0.15, 3-30 s, 85% of stoppages hidden) is the stress test.
+
+Checked on the training matches as the held-out side sees them
+(`python -m solution.experiments calibration`): the share of live frames inside ball gaps >= 2 s,
+which is 0.028 on ours.
+
+| regime | IDSSE (4) | Metrica (3) |
+|---|---|---|
+| default | 0.041-0.049 | 0.040-0.052 |
+| calibrated | 0.026-0.029 | 0.023-0.052 |
+
+IDSSE hits the target. Metrica's own 1-2 s tracker gaps already use up much of the budget, so
+metrica2 gets no injected gaps and stays harsher than our match (0.052). Under `calibrated` the
+held-out matches have as much live play hidden in long gaps as ours or more: the yardstick does not
+flatter the 2 s rule.
 
 ## 13. Learned dead ball vs the 2 s rule (`python -m solution.experiments dead`)
 `solution/dead_model.py` learns P(dead) from 16 mostly player-movement features
@@ -206,7 +219,7 @@ everywhere (2 of 7): `AUG_REGIME` stays "default".
 
 ## Phase 5 summary
 - Reproducible: training data pinned to fixed revisions; the submission built from scratch with
-  `OMP_NUM_THREADS=1` and with 16 threads is byte-identical (same SHA-256); format validated.
+  `OMP_NUM_THREADS=1` and with the default thread count (8 here) is byte-identical (same SHA-256); format validated.
 - Final configuration unchanged: Eni's model + 2 s dead-ball rule + Viterbi, switch cost 10.
   The learned dead ball (13) is available behind `--dead model`; it did not meet the bar.
 - Public 5 minutes, run once as a correctness check after every choice above was made (not

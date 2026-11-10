@@ -69,7 +69,7 @@ the same model) and writes `evaluation/results/model_viterbi.csv`:
 ```
 
 The training data is pinned to fixed revisions (`solution/download_external.py`), and the
-submission is byte-identical whether the model trains on 1 CPU thread or 16.
+submission is byte-identical whether the model trains on 1 CPU thread or the default 8.
 
 ## Data sources
 

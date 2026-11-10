@@ -10,13 +10,16 @@
     python -m solution.experiments budget      # where are the remaining points?
     python -m solution.experiments labels      # 12: training-label granularity vs the public window
     python -m solution.experiments dead        # 13: dead-ball rule vs learned P(dead)
+    python -m solution.experiments calibration # 13a: do augmented matches have our gap stats?
 
 Each held-out match is one of the 7 with a full H/A/D label (Metrica, IDSSE); the model is
 trained on the other 11 matches every time. Results are the mean over the 7 and, against the
 reference configuration, on how many of the 7 a variant is better -- with 7 matches a difference
 under ~0.01-0.02 spellF1 is noise unless it wins on most of them.
 
-Nothing here touches the competition match.
+Only three read anything of the competition match, and print aggregates only: `labels` (the
+public ground truth), `dead` and `calibration` (our tracking's ball-gap statistics, through
+augment.regime("calibrated") and solution/gap_stats.py).
 """
 
 import os
@@ -695,12 +698,37 @@ def exp_dead():
     return res, best
 
 
+def exp_calibration():
+    """Do the training matches, augmented under each regime, have our match's ball-gap statistics?
+    Per match: share of graded frames in ball gaps >= 2 s, share of those frames that are live,
+    and share of live frames inside them (the calibration target)."""
+    for name_r in ("default", "calibrated"):
+        params = augment.regime(name_r)
+        print("\nregime {} {}".format(name_r, params))
+        print("  {:<14} {:>14} {:>16} {:>18}".format(
+            "match", "in long gaps", "live share of", "live frames in"))
+        for name, arrays in labelled():
+            held = augment.augment(arrays, M.seed_of(name) + 1, params)
+            missing = np.isnan(held["ball_xy"][:, 0])
+            inside, long_gap = np.zeros(len(missing), bool), np.zeros(len(missing), bool)
+            for a, b in arrays["runs"]:
+                inside[a:b] = True
+            for a, b in dead_ball.stretches(missing, arrays["runs"]):
+                long_gap[a:b] = b - a >= dead_ball.MIN_DEAD_S * dead_ball.FPS
+            live = inside & ~arrays["dead"]
+            print("  {:<14} {:>14.3f} {:>16.3f} {:>18.3f}".format(
+                name, long_gap[inside].mean(), (long_gap & live).sum() / max(long_gap.sum(), 1),
+                long_gap[live].mean()))
+
+
 if __name__ == "__main__":
     which = sys.argv[1:] or ["timing", "decoding"]
     if "labels" in which:
         exp_labels()
     if "dead" in which:
         exp_dead()
+    if "calibration" in which:
+        exp_calibration()
     if "features" in which:
         exp_features()
     if "mix" in which:
