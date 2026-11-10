@@ -233,3 +233,17 @@ everywhere (2 of 7): `AUG_REGIME` stays "default".
   Teams are not swapped and frames line up (team accuracy 0.92, possession count exact).
   Alive/dead F1 sits 0.006 under the smoothed baseline: within noise on 1,469 dead frames,
   not a bug signature.
+
+## 14. Switch cost chosen on Metrica only (`python -m solution.experiments switch`)
+Experiment 12 found IDSSE's labels cut possessions ~2.3x finer than the public ground truth and
+Metrica's ~1.4x, so a switch cost tuned on all 7 held-out matches leans towards too many
+switches. Metrica is the closer proxy for our labels.
+
+Rule, written and committed before the run:
+- Grid: switch cost 6, 8, 10, 14, 20, 30, 40, 60, 80; everything else as the final configuration.
+- c_M = the cost with the best mean held-out spellF1 over the 3 Metrica matches.
+- Adopt c_M as `decode.SWITCH_COST` only if all three hold: (a) c_M is not 10; (b) c_M beats
+  cost 10 on at least 2 of the 3 Metrica matches; (c) the mean over all 7 matches is not worse
+  than cost 10's by more than 0.01 (a guard against a cost that fits only three matches).
+- Predicted possessions per live minute on Metrica are printed next to the truth as a sanity
+  check, not a criterion. The public window plays no part.
