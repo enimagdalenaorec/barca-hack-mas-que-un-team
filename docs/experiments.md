@@ -139,3 +139,24 @@ Retrain twice on the model's own confident, smoothed guesses about the held-out 
 ## 11. Smart Tagging hints at restarts — not run
 Restart team is already 97% right on the training matches, and only the competition match has
 Smart Tagging, so the idea could not be tested honestly. Left out.
+
+# Phase 5 (bruno): reproducibility, learned dead ball
+
+Eni's held-out numbers reproduce exactly on Python 3.12 with the pinned training data (cost 10:
+0.645, baseline 0.449).
+
+## 12. Label granularity (`python -m solution.experiments labels`)
+Do the training labels cut possessions as finely as the public ground truth? Raw truth, runs as
+the metric builds them (non-X frames):
+
+| source | poss / live min | median s | < 1 s | < 3 s | direct H<->A / live min |
+|---|---|---|---|---|---|
+| Metrica (mean of 3) | 5.92 | 5.4 | 0.08 | 0.32 | 4.29 |
+| IDSSE (mean of 4) | 9.32 | 3.4 | 0.13 | 0.45 | 7.21 |
+| public 5 min (17 possessions) | 4.23 | 7.6 | 0.06 | 0.18 | 2.98 |
+
+No source is 3x off (the stop threshold; worst single match: IDSSE J03WN1 at 2.9x on direct
+turnovers), so the labels stay as they are. But IDSSE cuts possessions about 2.3x finer than the
+public window, Metrica 1.4x. The held-out yardstick therefore rewards more switches than our
+ground truth probably does: a switch cost tuned on it leans low. The public window is 5 minutes,
+so this is a direction, not a number to tune to.

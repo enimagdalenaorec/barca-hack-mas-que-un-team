@@ -8,6 +8,7 @@
     python -m solution.experiments augment     # 6: sensitivity to the augmentation guesses
     python -m solution.experiments stacking    # 7: a second model over the first one's guesses
     python -m solution.experiments budget      # where are the remaining points?
+    python -m solution.experiments labels      # 8: training-label granularity vs the public window
 
 Each held-out match is one of the 7 with a full H/A/D label (Metrica, IDSSE); the model is
 trained on the other 11 matches every time. Results are the mean over the 7 and, against the
@@ -594,8 +595,45 @@ def exp_budget(p):
     }, "ours")
 
 
+# -- label granularity -------------------------------------------------------------------------
+
+def granularity(codes):
+    """Possession statistics of one label sequence, scored the way the metric sees it (runs from
+    the non-X frames): possessions and direct H<->A turnovers per live minute, median possession
+    length (s), share of possessions under 1 s and under 3 s."""
+    runs = pm.valid_runs(codes)
+    segs = pm.segments(codes, runs)
+    poss = np.array([(b - a) / M.dead_ball.FPS for a, b, k in segs if k in (pm.H, pm.A)])
+    live_min = poss.sum() / 60.0
+    direct = sum(1 for (_, b1, k1), (a2, _, k2) in zip(segs, segs[1:])
+                 if b1 == a2 and {k1, k2} == {pm.H, pm.A})
+    return (len(poss) / live_min, float(np.median(poss)), float(np.mean(poss < 1)),
+            float(np.mean(poss < 3)), direct / live_min, len(poss))
+
+
+def exp_labels():
+    """Do the training labels cut possessions as finely as the public ground truth does?"""
+    rows = [(name.rstrip("0123456789").split("_")[0], name, granularity(M.truth_codes(arrays)))
+            for name, arrays in labelled()]
+    public = os.path.join(ROOT, "evaluation", "gt", "BAR-ATH_possession_gt_public.csv")
+    rows.append(("public", "BAR-ATH 5 min", granularity(pm.label_codes(pm.read_label_csv(public)))))
+    print("{:<8} {:<16} {:>9} {:>9} {:>7} {:>7} {:>10} {:>6}".format(
+        "source", "match", "poss/min", "median s", "<1 s", "<3 s", "direct/min", "poss"))
+    for source in ("metrica", "idsse", "public"):
+        group = [r for r in rows if r[0] == source]
+        for _, name, g in group:
+            print("{:<8} {:<16} {:>9.2f} {:>9.1f} {:>7.2f} {:>7.2f} {:>10.2f} {:>6d}".format(
+                source, name, *g))
+        if len(group) > 1:
+            mean = np.mean([g[:5] for _, _, g in group], axis=0)
+            print("{:<8} {:<16} {:>9.2f} {:>9.1f} {:>7.2f} {:>7.2f} {:>10.2f}".format(
+                source, "mean", *mean))
+
+
 if __name__ == "__main__":
     which = sys.argv[1:] or ["timing", "decoding"]
+    if "labels" in which:
+        exp_labels()
     if "features" in which:
         exp_features()
     if "mix" in which:
