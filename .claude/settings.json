@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./data/tactical/**)",
+      "Read(./data/broadcast/**)",
+      "Read(./data/cache/BAR-ATH*)",
+      "Read(./evaluation/results/**)",
+      "Read(./evaluation/reports/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "grep -qiE 'data[/\\\\]+(tactical|broadcast)|BAR-ATH_(tactical|broadcast)' && { echo 'Blocked by project rule: competition match data must not be shown to Claude (T&C ban on cloud LLMs). Run it yourself and share only aggregate numbers.' >&2; exit 2; }; exit 0",
+            "statusMessage": "Checking for match-data access"
+          }
+        ]
+      }
+    ]
+  }
+}
