@@ -22,12 +22,17 @@ published baseline's rule.
 
 ## Reproduce
 
-Python 3.9 or newer, about 2 GB of free disk during the download (~0.2 GB stays).
+Python 3.9 to 3.12 (numpy 2.0.2 has no 3.13 wheels), about 2 GB of free disk during the download
+(~0.2 GB stays).
 
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-solution.txt
 ```
+
+On Windows create it with `py -3.12 -m venv .venv` and write `.venv/Scripts/python` wherever this
+page says `.venv/bin/python` (`.venv/Scripts/python -m pip install -r requirements-solution.txt`
+for the install).
 
 Put the four tactical match files in `data/tactical/` (see [DATA.md](DATA.md)). Then fetch and
 convert the training matches — ~1.7 GB is downloaded, converted to compact arrays, and the raw

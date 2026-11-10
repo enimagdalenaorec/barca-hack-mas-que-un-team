@@ -22,7 +22,9 @@ sys.path.insert(0, ROOT)
 from solution import external_games as ext  # noqa: E402
 
 # Params
-METRICA_URL = "https://raw.githubusercontent.com/metrica-sports/sample-data/master/data/"
+# Pinned so the training set cannot change under the submission.
+METRICA_URL = ("https://raw.githubusercontent.com/metrica-sports/sample-data/"
+               "e706dd506b360d69d9d123d5b8026e7294b13996/data/")
 METRICA_FILES = {
     1: ["Sample_Game_1_RawEventsData.csv", "Sample_Game_1_RawTrackingData_Home_Team.csv",
         "Sample_Game_1_RawTrackingData_Away_Team.csv"],
@@ -30,7 +32,9 @@ METRICA_FILES = {
         "Sample_Game_2_RawTrackingData_Away_Team.csv"],
     3: ["Sample_Game_3_events.json", "Sample_Game_3_metadata.xml", "Sample_Game_3_tracking.txt"],
 }
-IDSSE_URL = "https://huggingface.co/datasets/pysport/idsse-data/resolve/main/"
+# Pinned so the training set cannot change under the submission.
+IDSSE_URL = ("https://huggingface.co/datasets/pysport/idsse-data/resolve/"
+             "a715a38dfbaf5f58e431727c2b78d174101a703c/")
 SC_RAW = "https://raw.githubusercontent.com/SkillCorner/opendata/master/data/matches/"
 SC_LFS = "https://media.githubusercontent.com/media/SkillCorner/opendata/master/data/matches/"
 MATCHES = {
