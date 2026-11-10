@@ -267,3 +267,33 @@ c_M = 14: not 10, 3 of 3 wins, all-7 mean up 0.002 -> **adopted** (`decode.SWITC
 A small, consistent gain (+0.005 on Metrica), not a big one. The premise held only in part: IDSSE
 is flat from 6 to 14 rather than pulling the cost down, and 14 was already the top of the all-7
 curve, where 10 had been picked as the plateau's middle. The public window was not rerun.
+
+## 15. Bigger team model (`python -m solution.experiments bigger`)
+Experiment 5 found bigger boosting better, and 600 trees / 63 leaves is the largest tried.
+
+Rule, written and committed before the run:
+- Variants (max_iter, max_leaf_nodes): (1000, 63), (600, 127), (1000, 127); every other GBM
+  setting unchanged; decoded at the current switch cost (14); original training labels.
+- Adopt the variant with the best mean held-out spellF1 only if it beats the current (600, 63)
+  on the mean and on at least 5 of the 7 matches. Otherwise keep (600, 63).
+
+## 16. Training labels relabelled to "controlled" possession (`python -m solution.experiments control`)
+CHALLENGE.md: possession changes only when the other team gains *controlled* possession; a touch
+without control, a deflection, or an aerial duel without subsequent control is no change, and in
+contested or loose phases possession stays with the last team that had it. Our training labels
+switch on any touch (experiment 12: 1.4-2.3x more possessions than the public ground truth).
+
+Rule, written and committed before the run:
+- Relabelling: inside each live stretch, possession passes to the other team only when that
+  team holds the ball for at least T seconds in a row; its shorter spells go to the team that
+  had the ball. The first spell after a restart stands (the restart has a clear possessor).
+- T = 2 s, fixed from CHALLENGE.md's proxy "a player keeps the ball for a few seconds".
+  T = 1 s and 3 s are reported for robustness only, never chosen.
+- Applied to every training match, so training rows and held-out truth both change. The switch
+  cost is re-chosen against the relabelled held-out truth: best mean over all 7 matches, grid
+  2, 4, 6, 8, 10, 14, 20, 30, 40.
+- Held-out scores cannot compare label definitions (each is scored against its own), so the
+  decision is one public-window run, after experiment 15 is settled, with two files built from
+  the same team-model settings: the current configuration and the T = 2 one. Adopt T = 2 only
+  if its public spellF1 is at least 0.03 higher (beyond the noise of 17 possessions); otherwise
+  keep the current file. Nothing else is scored on the public window afterwards.
