@@ -11,6 +11,7 @@
     python -m solution.experiments labels      # 12: training-label granularity vs the public window
     python -m solution.experiments dead        # 13: dead-ball rule vs learned P(dead)
     python -m solution.experiments calibration # 13a: do augmented matches have our gap stats?
+    python -m solution.experiments switch      # 14: switch cost chosen on Metrica only
 
 Each held-out match is one of the 7 with a full H/A/D label (Metrica, IDSSE); the model is
 trained on the other 11 matches every time. Results are the mean over the 7 and, against the
@@ -721,6 +722,42 @@ def exp_calibration():
                 long_gap[live].mean()))
 
 
+SWITCH_GRID = (6, 8, 10, 14, 20, 30, 40, 60, 80)
+
+
+def exp_switch():
+    """Switch cost chosen on the 3 Metrica held-out matches only, whose labels are closest to the
+    public ground truth's granularity (experiment 12). Rule pre-registered in docs/experiments.md,
+    section 14; the decision is printed, not applied."""
+    p = predictions()
+    metrica = [n for n in p if n.startswith("metrica")]
+    per, granul = {}, {}
+    for cost in SWITCH_GRID:
+        codes = {n: decode_match(n, q, cost=cost) for n, q in p.items()}
+        per[cost] = score_all(codes)
+        granul[cost] = np.mean([granularity(codes[n])[0] for n in metrica])
+    truth = np.mean([granularity(held_out(n, dict(labelled())[n])["gt"])[0] for n in metrica])
+
+    def mean(cost, names):
+        return float(np.mean([per[cost][n][0] for n in names]))
+
+    print("\nswitch cost  metrica spellF1  wins of 3 vs 10  all-7 spellF1  idsse spellF1  "
+          "metrica poss/min (truth {:.2f})".format(truth))
+    for cost in SWITCH_GRID:
+        wins = sum(per[cost][n][0] > per[10][n][0] + 1e-9 for n in metrica)
+        print("  {:<10} {:>15.3f} {:>16} {:>14.3f} {:>14.3f} {:>16.2f}".format(
+            cost, mean(cost, metrica), wins, mean(cost, p), mean(cost, [n for n in p if n not in metrica]),
+            granul[cost]))
+    best = max(SWITCH_GRID, key=lambda c: mean(c, metrica))
+    wins = sum(per[best][n][0] > per[10][n][0] + 1e-9 for n in metrica)
+    drop = mean(10, p) - mean(best, p)
+    adopt = best != 10 and wins >= 2 and drop <= 0.01
+    print("\nc_M = {}: (a) not 10: {}  (b) wins {} of 3: {}  (c) all-7 drop {:.3f}: {}  -> {}".format(
+        best, best != 10, wins, wins >= 2, drop, drop <= 0.01,
+        "ADOPT" if adopt else "keep 10"))
+    return per, best, adopt
+
+
 if __name__ == "__main__":
     which = sys.argv[1:] or ["timing", "decoding"]
     if "labels" in which:
@@ -729,6 +766,8 @@ if __name__ == "__main__":
         exp_dead()
     if "calibration" in which:
         exp_calibration()
+    if "switch" in which:
+        exp_switch()
     if "features" in which:
         exp_features()
     if "mix" in which:

@@ -17,9 +17,11 @@ import numpy as np
 EPS = 1e-4  # keeps log() finite for a model that is (over)confident
 # Held-out mean spellF1 over 7 labelled training matches, final model
 # (python -m solution.model --evaluate):
-#   cost 2: 0.592   4: 0.630   6: 0.642   8: 0.643   10: 0.645   14: 0.648   20: 0.641   30: 0.625
-# A plateau from 6 to 20; 10 sits in its middle rather than on its noisiest point.
-SWITCH_COST = 10.0
+#   cost 2: 0.592   4: 0.630   6: 0.642   8: 0.643   10: 0.645   14: 0.647   20: 0.640   30: 0.624
+# Chosen on the 3 Metrica matches only, whose labels are closest to the public ground truth's
+# granularity, by a rule fixed before the run (python -m solution.experiments switch;
+# docs/experiments.md, 14): 14 beats 10 on 3 of 3 (0.744 vs 0.739) and on the all-7 mean.
+SWITCH_COST = 14.0
 # Three-state decoder (viterbi3, pipeline --dead model): leaving play for a stoppage, and coming
 # back. Best mean held-out spellF1 under the calibrated regime (python -m solution.experiments
 # dead); the grid over {4, 8, 12, 20}^2 is flat, 0.657-0.659.

@@ -220,7 +220,8 @@ everywhere (2 of 7): `AUG_REGIME` stays "default".
 ## Phase 5 summary
 - Reproducible: training data pinned to fixed revisions; the submission built from scratch with
   `OMP_NUM_THREADS=1` and with the default thread count (8 here) is byte-identical (same SHA-256); format validated.
-- Final configuration unchanged: Eni's model + 2 s dead-ball rule + Viterbi, switch cost 10.
+- Final configuration: Eni's model + 2 s dead-ball rule + Viterbi; switch cost 14 since
+  experiment 14 (was 10; the public-window row below was run at 10).
   The learned dead ball (13) is available behind `--dead model`; it did not meet the bar.
 - Public 5 minutes, run once as a correctness check after every choice above was made (not
   used to choose anything):
@@ -247,3 +248,22 @@ Rule, written and committed before the run:
   than cost 10's by more than 0.01 (a guard against a cost that fits only three matches).
 - Predicted possessions per live minute on Metrica are printed next to the truth as a sanity
   check, not a criterion. The public window plays no part.
+
+Result (held-out spellF1; possessions per live minute on Metrica, truth 5.92):
+
+| switch cost | Metrica (3) | wins vs 10 | all 7 | IDSSE (4) | Metrica poss/min |
+|---|---|---|---|---|---|
+| 6 | 0.730 | 1 | 0.642 | 0.575 | 5.66 |
+| 8 | 0.732 | 0 | 0.643 | 0.575 | 5.51 |
+| 10 | 0.739 | - | 0.645 | 0.575 | 5.34 |
+| **14** | **0.744** | **3** | **0.647** | 0.575 | 5.12 |
+| 20 | 0.736 | 1 | 0.640 | 0.569 | 4.79 |
+| 30 | 0.723 | 1 | 0.624 | 0.551 | 4.54 |
+| 40 | 0.712 | 0 | 0.605 | 0.525 | 4.37 |
+| 60 | 0.689 | 0 | 0.583 | 0.503 | 4.12 |
+| 80 | 0.676 | 0 | 0.564 | 0.481 | 3.99 |
+
+c_M = 14: not 10, 3 of 3 wins, all-7 mean up 0.002 -> **adopted** (`decode.SWITCH_COST = 14`).
+A small, consistent gain (+0.005 on Metrica), not a big one. The premise held only in part: IDSSE
+is flat from 6 to 14 rather than pulling the cost down, and 14 was already the top of the all-7
+curve, where 10 had been picked as the plateau's middle. The public window was not rerun.

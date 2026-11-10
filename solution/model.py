@@ -15,7 +15,8 @@ whole pipeline -- our dead-ball rule on the augmented ball, the model, then Vite
 The same is done for the published baseline rule (nearest player, +/-50 vote) so the two can be
 compared on matches neither has seen. SkillCorner matches only ever train (no dead-ball label).
 
-The Viterbi switch cost is chosen here, as the value with the best mean held-out spellF1.
+The Viterbi switch cost is scored here; it is chosen on the Metrica matches only
+(python -m solution.experiments switch, docs/experiments.md 14).
 """
 
 import argparse

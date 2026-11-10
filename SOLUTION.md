@@ -17,8 +17,9 @@ kit, unchanged. The approach and every experiment behind it are in
 4. **Smoothing** (`solution/decode.py`): Viterbi with a cost for switching teams turns the per-frame
    probabilities into whole possessions.
 
-Held-out score on matches the model never saw: spellF1 **0.645** against **0.449** for the
-published baseline's rule.
+Held-out score on matches the model never saw: spellF1 **0.647** against **0.449** for the
+published baseline's rule. The switch cost (14) is chosen on the 3 Metrica matches, whose labels
+are closest to the organisers' in granularity ([docs/experiments.md](docs/experiments.md), 14).
 
 Tried and kept as an option, not the default: a learned dead-ball model (`solution/dead_model.py`)
 decoded together with the team in one home / away / dead Viterbi. It wins on the 4 IDSSE matches
