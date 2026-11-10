@@ -758,6 +758,67 @@ def exp_switch():
     return per, best, adopt
 
 
+BIGGER = ((1000, 63), (600, 127), (1000, 127))  # (max_iter, max_leaf_nodes)
+
+
+def exp_bigger():
+    """Larger boosting models than the current 600 trees / 63 leaves, decoded at the current
+    switch cost. Rule pre-registered in docs/experiments.md, section 15."""
+    def make(iters, leaves):
+        return lambda: HistGradientBoostingClassifier(
+            **{**M.GBM, "max_iter": iters, "max_leaf_nodes": leaves})
+
+    variants = {}
+    for iters, leaves in ((M.GBM["max_iter"], M.GBM["max_leaf_nodes"]),) + BIGGER:
+        p = predictions(make_model=make(iters, leaves))
+        variants["{} trees / {} leaves".format(iters, leaves)] = score_all(
+            {n: decode_match(n, q) for n, q in p.items()})
+        print("  done {} / {}".format(iters, leaves), flush=True)
+    reference = "{} trees / {} leaves".format(M.GBM["max_iter"], M.GBM["max_leaf_nodes"])
+    table("exp 15 -- bigger team model (switch cost {:g})".format(decode.SWITCH_COST),
+          variants, reference)
+    ref = variants[reference]
+    best = max(variants, key=lambda k: np.mean([v[0] for v in variants[k].values()]))
+    wins = sum(variants[best][n][0] > ref[n][0] + 1e-9 for n in ref)
+    better = np.mean([v[0] for v in variants[best].values()]) > np.mean([v[0] for v in ref.values()])
+    print("\nbest: {}; beats the reference on the mean: {}; wins {} of 7 -> {}".format(
+        best, better, wins, "ADOPT" if best != reference and better and wins >= 5 else "keep"))
+
+
+CONTROL_T = (1.0, 2.0, 3.0)  # T = 2 s is the pre-registered one; 1 and 3 for robustness
+CONTROL_COSTS = (2, 4, 6, 8, 10, 14, 20, 30, 40)
+
+
+def exp_control():
+    """Training labels relabelled to controlled possession (model.controlled), held-out truth
+    relabelled the same way, switch cost re-chosen on all 7. Rule pre-registered in
+    docs/experiments.md, section 16. Scores compare costs within one T, never across T."""
+    for t in CONTROL_T:
+        M._ROWS.clear()  # rows memo is keyed by match name; labels differ per T
+        ms = M.training_matches(control_s=t)
+        lab = [m for m in ms if int(m[1]["has_dead"])]
+        stats = {src: np.mean([granularity(M.truth_codes(a))[:5] for n, a in lab
+                               if n.startswith(src)], axis=0) for src in ("metrica", "idsse")}
+        res = {c: [] for c in CONTROL_COSTS}
+        for name, arrays in lab:
+            clf = M.fit([m for m in ms if m[0] != name])
+            held = augment.augment(arrays, M.seed_of(name) + 1)
+            p = M.p_home(clf, held, arrays["runs"])
+            gt = M.truth_codes(arrays)
+            for c in CONTROL_COSTS:
+                res[c].append(M.score(gt, M.labels_from(p, held, arrays["runs"], c))[0])
+        best = max(CONTROL_COSTS, key=lambda c: np.mean(res[c]))
+        print("\nT = {:g} s: relabelled truth, possessions / live min, median s, direct / live min"
+              .format(t))
+        for src, g in stats.items():
+            print("  {:<8} {:.2f}  {:.1f}  {:.2f}".format(src, g[0], g[1], g[4]))
+        print("  held-out spellF1 by switch cost: " + "  ".join(
+            "{}: {:.3f}".format(c, np.mean(res[c])) for c in CONTROL_COSTS))
+        print("  best cost {} -> {:.3f} (metrica {:.3f}, idsse {:.3f})".format(
+            best, np.mean(res[best]), np.mean(res[best][:3]), np.mean(res[best][3:])), flush=True)
+    M._ROWS.clear()
+
+
 if __name__ == "__main__":
     which = sys.argv[1:] or ["timing", "decoding"]
     if "labels" in which:
@@ -768,6 +829,10 @@ if __name__ == "__main__":
         exp_calibration()
     if "switch" in which:
         exp_switch()
+    if "bigger" in which:
+        exp_bigger()
+    if "control" in which:
+        exp_control()
     if "features" in which:
         exp_features()
     if "mix" in which:

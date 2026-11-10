@@ -51,14 +51,39 @@ GBM = dict(max_iter=600, learning_rate=0.1, max_leaf_nodes=63, min_samples_leaf=
 SOURCES = ("idsse",)
 # How the training matches are degraded before training (solution/augment.py REGIMES).
 AUG_REGIME = "default"
+# Training labels as "controlled" possession (CHALLENGE.md): the other team must hold the ball
+# this many seconds in a row for possession to change. None = the sources' own labels.
+CONTROL_S = None
 
 
-def training_matches():
-    """[(name, arrays)] for every match we train on: Metrica + the sources in SOURCES."""
+def training_matches(control_s=None):
+    """[(name, arrays)] for every match we train on: Metrica + the sources in SOURCES, labels
+    relabelled to controlled possession when control_s (default CONTROL_S) is set."""
     out = [("metrica{}".format(n), sample_games.load(n)) for n in sample_games.GAMES]
     for source, match in download_external.converted():
         if source in SOURCES:
             out.append(("{}_{}".format(source, match), external_games.load(source, match)))
+    control_s = CONTROL_S if control_s is None else control_s
+    if control_s:
+        frames = int(round(control_s * dead_ball.FPS))
+        out = [(name, {**a, "owner": controlled(a["owner"], a["dead"], a["runs"], frames)})
+               for name, a in out]
+    return out
+
+
+def controlled(owner, dead, runs, min_frames):
+    """Owner per frame, changing team only when the other team holds the ball for at least
+    min_frames in a row inside a live stretch; its shorter spells (touches, deflections, duels,
+    loose balls) go to the team that had it. The first spell after a restart stands."""
+    out = owner.copy()
+    for start, stop in dead_ball.stretches(~dead, runs):
+        seg = owner[start:stop]
+        bounds = np.concatenate(([0], np.flatnonzero(np.diff(seg)) + 1, [len(seg)]))
+        current = seg[0]
+        for a, b in zip(bounds[:-1], bounds[1:]):
+            if seg[a] != current and b - a >= min_frames:
+                current = seg[a]
+            out[start + a:start + b] = current
     return out
 
 
@@ -223,7 +248,7 @@ def fingerprint(matches, params=None):
     """Everything the saved model depends on. A saved model with another fingerprint is stale."""
     names = features.compute(matches[0][1], matches[0][1]["runs"][:1])[0]
     return {"features": names, "gbm": GBM, "matches": [name for name, _ in matches],
-            "augment": augment.settings(params), "subsample": SUBSAMPLE}
+            "augment": augment.settings(params), "subsample": SUBSAMPLE, "control_s": CONTROL_S}
 
 
 def train_and_save(matches=None, params=None):

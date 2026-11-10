@@ -132,6 +132,27 @@ def test_calibrated_live_gaps_raise_share():
     assert out["LIVE_GAP_SHARE"] > 0.2 and 5.0 <= out["LIVE_GAP_S"][0] <= out["LIVE_GAP_S"][1] <= 7.0
 
 
+def test_controlled_merges_short_opposing_spell():
+    owner = np.r_[np.zeros(100), np.ones(30), np.zeros(100), np.ones(80)].astype(np.int8)
+    out = model.controlled(owner, np.zeros(310, bool), [(0, 310)], 50)
+    assert (out[:230] == 0).all() and (out[230:] == 1).all()
+
+
+def test_controlled_keeps_restart_spell_and_merges_short_last_spell():
+    # dead | A 10 | B 100 | A 20 | dead
+    owner = np.r_[np.full(20, -1), np.zeros(10), np.ones(100), np.zeros(20), np.full(20, -1)]
+    owner = owner.astype(np.int8)
+    dead = owner < 0
+    out = model.controlled(owner, dead, [(0, 170)], 50)
+    assert (out[20:30] == 0).all() and (out[30:150] == 1).all() and (out[dead] == -1).all()
+
+
+def test_controlled_contested_phase_stays_with_last_team():
+    owner = np.r_[np.zeros(100), np.tile(np.r_[np.ones(20), np.zeros(20)], 4)].astype(np.int8)
+    out = model.controlled(owner, np.zeros(len(owner), bool), [(0, len(owner))], 50)
+    assert (out == 0).all()
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items() if name.startswith("test_") and callable(fn)]
     for name, fn in tests:
