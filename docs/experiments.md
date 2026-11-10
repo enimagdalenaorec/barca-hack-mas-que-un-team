@@ -297,3 +297,40 @@ Rule, written and committed before the run:
   the same team-model settings: the current configuration and the T = 2 one. Adopt T = 2 only
   if its public spellF1 is at least 0.03 higher (beyond the noise of 17 possessions); otherwise
   keep the current file. Nothing else is scored on the public window afterwards.
+
+## 15. Result: bigger team model -- kept 600 / 63
+
+| variant | spellF1 | macroF1 | wins vs 600 / 63 | Metrica | IDSSE |
+|---|---|---|---|---|---|
+| 600 trees / 63 leaves (current) | 0.647 | 0.904 | ref | 0.744 | 0.575 |
+| 1000 / 63 | 0.646 | 0.904 | 3/7 | 0.738 | 0.577 |
+| 600 / 127 | 0.646 | 0.904 | 4/7 | 0.734 | 0.580 |
+| 1000 / 127 | 0.648 | 0.904 | 4/7 | 0.729 | 0.587 |
+
+Best mean 1000 / 127, but 4 of 7 wins (5 needed): **kept**. Model size is saturated.
+
+## 16. Result: controlled-possession labels -- kept the original labels
+Relabelled training truth (held-out, scored against its own relabelling; comparable within a T
+only):
+
+| T | Metrica poss / live min | median s | direct / live min | best switch cost | held-out spellF1 |
+|---|---|---|---|---|---|
+| 1 s | 5.32 | 6.6 | 3.69 | 14 | 0.690 |
+| **2 s** | **4.48** | **8.9** | **2.84** | **30** | **0.722** |
+| 3 s | 3.87 | 10.9 | 2.24 | 40 | 0.750 |
+| public window | 4.23 | 7.6 | 2.98 | | |
+
+T = 2 s brings Metrica's labels to the public ground truth's granularity, as the written
+definition suggested. The decision run on the public window, once, both files from the same
+600 / 63 model:
+
+| public 5 min | spellF1 | macroF1 | possessions (truth 17) | mean s (truth 14.2) |
+|---|---|---|---|---|
+| current (original labels, cost 14) | 0.533 | 0.685 | 16 | 16.6 |
+| T = 2 s, cost 30 | 0.452 | 0.684 | 14 | 18.9 |
+
+**Not adopted** (needed +0.03, got -0.08). The premise failed on our match: although the training
+labels switch more often than the public ground truth, the model's predictions on our match
+already have about the right number of possessions (16 vs 17), and relabelling made them too long.
+`model.CONTROL_S` stays None; the candidate file was deleted and nothing else is scored on the
+public window.
