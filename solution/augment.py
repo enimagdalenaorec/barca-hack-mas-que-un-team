@@ -37,6 +37,27 @@ LIVE_GAP_SHARE = 0.05
 LIVE_GAP_S = (2.0, 15.0)
 PLAYER_DROP_SHARE = 0.03  # our match tracks a median of 11 per team on live frames
 PLAYER_DROP_S = (1.0, 10.0)
+PARAMS = ("BRIDGE_S", "HIDE_DEAD_P", "LIVE_GAP_SHARE", "LIVE_GAP_S", "PLAYER_DROP_SHARE",
+          "PLAYER_DROP_S")
+# Named overrides of the settings above, for training and for degrading held-out matches.
+# "harsh": more and longer live-play ball gaps, fewer hidden stoppages.
+REGIMES = {"default": {},
+           "harsh": {"LIVE_GAP_SHARE": 0.15, "LIVE_GAP_S": (3.0, 30.0), "HIDE_DEAD_P": 0.85}}
+
+
+def regime(name):
+    """The overrides of a named regime, as a fresh dict."""
+    return dict(REGIMES[name])
+
+
+def settings(params=None):
+    """Every setting augment() uses: the module defaults, overridden by params."""
+    out = {name: globals()[name] for name in PARAMS}
+    unknown = set(params or {}) - set(PARAMS)
+    if unknown:
+        raise KeyError("unknown augment settings {}".format(sorted(unknown)))
+    out.update(params or {})
+    return out
 
 
 def _bridge(xy, runs, max_frames):
@@ -53,16 +74,18 @@ def _bridge(xy, runs, max_frames):
     return out
 
 
-def augment(arrays, seed):
+def augment(arrays, seed, params=None):
+    """Augmented copy of arrays; params overrides the module settings for this call only."""
+    p = settings(params)
     rng = np.random.default_rng(seed)
     runs = arrays["runs"]
     out = dict(arrays)
-    ball = _bridge(arrays["ball_xy"].astype(np.float64), runs, int(BRIDGE_S * FPS))
+    ball = _bridge(arrays["ball_xy"].astype(np.float64), runs, int(p["BRIDGE_S"] * FPS))
     players = arrays["players_xy"].astype(np.float64).copy()
 
     if int(arrays.get("has_dead", 0)):
         for start, stop in stretches(arrays["dead"], runs):
-            if rng.random() < HIDE_DEAD_P:
+            if rng.random() < p["HIDE_DEAD_P"]:
                 ball[start:stop] = np.nan
 
     live = np.zeros(len(ball), dtype=bool)
@@ -71,18 +94,18 @@ def augment(arrays, seed):
     if int(arrays.get("has_dead", 0)):
         live &= ~arrays["dead"]
     live_idx = np.flatnonzero(live)
-    budget = int(LIVE_GAP_SHARE * len(live_idx)) - int(np.isnan(ball[live_idx, 0]).sum())
+    budget = int(p["LIVE_GAP_SHARE"] * len(live_idx)) - int(np.isnan(ball[live_idx, 0]).sum())
     while budget > 0 and len(live_idx):
-        length = int(rng.uniform(*LIVE_GAP_S) * FPS)
+        length = int(rng.uniform(*p["LIVE_GAP_S"]) * FPS)
         start = int(rng.choice(live_idx))
         ball[start:start + length] = np.nan
         budget -= length
 
     n, slots = players.shape[:2]
     for slot in range(slots):
-        budget = int(PLAYER_DROP_SHARE * n)
+        budget = int(p["PLAYER_DROP_SHARE"] * n)
         while budget > 0:
-            length = int(rng.uniform(*PLAYER_DROP_S) * FPS)
+            length = int(rng.uniform(*p["PLAYER_DROP_S"]) * FPS)
             start = int(rng.integers(0, n))
             players[start:start + length, slot] = np.nan
             budget -= length

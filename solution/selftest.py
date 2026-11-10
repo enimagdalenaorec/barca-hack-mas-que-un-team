@@ -10,7 +10,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from solution import dead_ball, dead_features, decode, model  # noqa: E402
+from solution import augment, dead_ball, dead_features, dead_model, decode, model  # noqa: E402
 
 FPS = 25
 LIVE_BLOCK, DEAD_BLOCK = 400, 150
@@ -97,6 +97,22 @@ def test_dead_features_still_players_read_as_still():
     arrays = synthetic_match(300, moving=False)
     names, X = dead_features.compute(arrays, [(0, 300)])
     assert np.nanmedian(X[:, names.index("still_share")]) > 0.9
+
+
+def test_augment_params_do_not_leak():
+    arrays = synthetic_match(5500, with_labels=True)  # long enough that 0.5 needs many gaps
+    a = augment.augment(arrays, 1, {"LIVE_GAP_SHARE": 0.5})
+    b = augment.augment(arrays, 1)
+    assert augment.LIVE_GAP_SHARE == 0.05
+    assert np.isnan(a["ball_xy"][:, 0]).sum() > np.isnan(b["ball_xy"][:, 0]).sum()
+
+
+def test_dead_model_learns_synthetic_stoppages():
+    m = [("s{}".format(i), synthetic_match(3000, with_labels=True, seed=i)) for i in range(3)]
+    clf = dead_model.fit(m[:2])
+    p = dead_model.p_dead(clf, m[2][1], m[2][1]["runs"])
+    dead = m[2][1]["dead"]
+    assert np.nanmean(p[dead]) > np.nanmean(p[~dead]) + 0.3
 
 
 def main():

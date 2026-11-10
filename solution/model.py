@@ -48,6 +48,8 @@ GBM = dict(max_iter=600, learning_rate=0.1, max_leaf_nodes=63, min_samples_leaf=
 # on 7 of 7 (solution/experiments.py, mix). Its labels come from SkillCorner's own software and
 # its tracking from a broadcast feed at 10 fps; both are further from our target than the rest.
 SOURCES = ("idsse",)
+# How the training matches are degraded before training (solution/augment.py REGIMES).
+AUG_REGIME = "default"
 
 
 def training_matches():
@@ -66,18 +68,25 @@ def seed_of(name):
 _ROWS = {}
 
 
-def rows(name, arrays):
+def params_key(params):
+    """Hashable form of an augment params dict, for memo keys."""
+    return tuple(sorted((params or {}).items()))
+
+
+def rows(name, arrays, params=None):
     """(X, y) training rows of one match: augmented, both team views, live frames, subsampled.
 
-    Memoised per match, because leave-one-out refits on the same matches many times.
+    Memoised per match and augment params, because leave-one-out refits on the same matches many
+    times.
     """
-    if name not in _ROWS:
-        _ROWS[name] = _rows(name, arrays)
-    return _ROWS[name]
+    key = (name, params_key(params))
+    if key not in _ROWS:
+        _ROWS[key] = _rows(name, arrays, params)
+    return _ROWS[key]
 
 
-def _rows(name, arrays):
-    aug = augment.augment(arrays, seed_of(name))
+def _rows(name, arrays, params=None):
+    aug = augment.augment(arrays, seed_of(name), params)
     owner = arrays["owner"]
     keep = owner >= 0
     if int(arrays["has_dead"]):
@@ -91,8 +100,8 @@ def _rows(name, arrays):
     return np.concatenate(xs), np.concatenate(ys)
 
 
-def fit(matches):
-    parts = [rows(name, arrays) for name, arrays in matches]
+def fit(matches, params=None):
+    parts = [rows(name, arrays, params) for name, arrays in matches]
     X = np.concatenate([p[0] for p in parts])
     y = np.concatenate([p[1] for p in parts])
     return HistGradientBoostingClassifier(**GBM).fit(X, y)
@@ -209,32 +218,33 @@ def learning_curve(matches, sizes=(3, 6, 9, 11), seed=0):
     return curve
 
 
-def fingerprint(matches):
+def fingerprint(matches, params=None):
     """Everything the saved model depends on. A saved model with another fingerprint is stale."""
     names = features.compute(matches[0][1], matches[0][1]["runs"][:1])[0]
     return {"features": names, "gbm": GBM, "matches": [name for name, _ in matches],
-            "augment": {k: getattr(augment, k) for k in dir(augment) if k.isupper()},
-            "subsample": SUBSAMPLE}
+            "augment": augment.settings(params), "subsample": SUBSAMPLE}
 
 
-def train_and_save(matches=None):
+def train_and_save(matches=None, params=None):
     matches = matches or training_matches()
-    model = fit(matches)
+    params = augment.regime(AUG_REGIME) if params is None else params
+    model = fit(matches, params)
     with open(MODEL_PATH, "wb") as handle:
-        pickle.dump({"model": model, "fingerprint": fingerprint(matches)}, handle)
+        pickle.dump({"model": model, "fingerprint": fingerprint(matches, params)}, handle)
     return model
 
 
-def load_or_train():
+def load_or_train(params=None):
     """The saved model if it was trained exactly as the code now would, else a fresh one.
     Training is seeded, so a fresh clone with the same data rebuilds the same model."""
     matches = training_matches()
+    params = augment.regime(AUG_REGIME) if params is None else params
     if os.path.isfile(MODEL_PATH):
         with open(MODEL_PATH, "rb") as handle:
             saved = pickle.load(handle)
-        if isinstance(saved, dict) and saved.get("fingerprint") == fingerprint(matches):
+        if isinstance(saved, dict) and saved.get("fingerprint") == fingerprint(matches, params):
             return saved["model"]
-    return train_and_save(matches)
+    return train_and_save(matches, params)
 
 
 if __name__ == "__main__":
