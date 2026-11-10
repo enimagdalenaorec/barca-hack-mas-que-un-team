@@ -1,8 +1,8 @@
 # Our solution: reproducing the submission
 
 Everything we added lives in `solution/`; the rest of this repository is the organisers' starter
-kit, unchanged. The approach and every experiment behind it are in
-[docs/experiments.md](docs/experiments.md).
+kit, unchanged. The technical document is [docs/technical_document.md](docs/technical_document.md);
+every experiment behind it is in [docs/experiments.md](docs/experiments.md).
 
 ## What it does
 
