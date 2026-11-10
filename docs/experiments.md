@@ -160,3 +160,18 @@ turnovers), so the labels stay as they are. But IDSSE cuts possessions about 2.3
 public window, Metrica 1.4x. The held-out yardstick therefore rewards more switches than our
 ground truth probably does: a switch cost tuned on it leans low. The public window is 5 minutes,
 so this is a direction, not a number to tune to.
+
+## 13a. Our match's ball gaps, aggregates only (`python -m solution.gap_stats`)
+How much of our long ball-missing time is live play? Mean player speed is the tell: 1.09 m/s on
+dead frames and 2.31 m/s on live frames of the 7 labelled matches, 1.14 m/s inside our gaps.
+
+| our match, graded frames | value |
+|---|---|
+| share inside ball gaps >= 2 s | 0.406 (133 gaps) |
+| gaps at live pace (mean speed above 1.70 m/s) | 26 |
+| estimated live share of gap frames, f | 0.04 |
+
+So nearly all of our long gaps are stoppages, and the `calibrated` augmentation regime is milder
+than Eni's default: `LIVE_GAP_SHARE` 0.028 (default 0.05), `LIVE_GAP_S` (6.1, 9.2) s (default
+2-15). The held-out yardstick was not flattering the 2 s rule; `harsh` (0.15, 3-30 s, 85% of
+stoppages hidden) is the stress test.

@@ -40,13 +40,23 @@ PLAYER_DROP_S = (1.0, 10.0)
 PARAMS = ("BRIDGE_S", "HIDE_DEAD_P", "LIVE_GAP_SHARE", "LIVE_GAP_S", "PLAYER_DROP_SHARE",
           "PLAYER_DROP_S")
 # Named overrides of the settings above, for training and for degrading held-out matches.
-# "harsh": more and longer live-play ball gaps, fewer hidden stoppages.
+# "harsh": more and longer live-play ball gaps, fewer hidden stoppages. "calibrated": see regime().
 REGIMES = {"default": {},
            "harsh": {"LIVE_GAP_SHARE": 0.15, "LIVE_GAP_S": (3.0, 30.0), "HIDE_DEAD_P": 0.85}}
 
 
+_calibrated = None
+
+
 def regime(name):
-    """The overrides of a named regime, as a fresh dict."""
+    """The overrides of a named regime, as a fresh dict. "calibrated" matches our match's ball
+    gaps (solution/gap_stats.py, aggregates only) and is measured once per process."""
+    global _calibrated
+    if name == "calibrated":
+        if _calibrated is None:
+            from solution import gap_stats
+            _calibrated = gap_stats.from_disk()
+        return dict(_calibrated)
     return dict(REGIMES[name])
 
 
