@@ -165,7 +165,11 @@ round 2 (within 0.001) and still above the rule-based one.
 
 **The public 5 minutes.** The public window is used only to check that the file is correct: teams
 not swapped, frames aligned, a sensible possession count. Every setting of the submitted
-configuration was chosen by the external harness (section 1).
+configuration was chosen by the external harness (section 1). Scored once as that check, the
+submitted file has spellF1 0.600 / macroF1 0.720, with 15 possessions against 17 in the truth and
+team accuracy 0.93 where both are alive; the smoothed published baseline scores 0.326 / 0.621.
+With 17 possessions one possession moves spellF1 by about six points, so this confirms
+correctness, not a ranking.
 
 ## 3. Training data
 
