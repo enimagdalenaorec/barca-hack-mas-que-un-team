@@ -23,12 +23,15 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from solution import dead_ball, dead_features, features  # noqa: E402
+from solution import augment, dead_ball, dead_features, features  # noqa: E402
 from solution import logo as L  # noqa: E402
 from solution import logo2 as L2  # noqa: E402
 from solution import model as M  # noqa: E402
 
 pm = M.pm
+# These experiments were run before the tracker-like smoothing became part of augment.py (and add
+# it themselves where they need it), so they switch it off to keep reproducing their numbers.
+augment.TRACKER_SMOOTH_W = 1
 
 # Params
 SPECS = ("default", "harsh", "lag")

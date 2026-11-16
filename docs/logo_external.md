@@ -612,3 +612,24 @@ vanjskima.
 
 Metrica 0.790, IDSSE 0.665, macroF1 0.931, 321 / 412 posjeda. Odluka: **usvoji** (dobitak ≥ 0.008,
 8/10 ≥ 7, harsh i lag pozitivni). Predana konfiguracija.
+
+# Krug 4: učenje na lopti zaglađenoj kao natjecateljska (solution/smooth_train_exp.py)
+
+Novi held-out regim `tracker`: vanjska held-out utakmica s loptom zaglađenom pomičnim prosjekom
+unatrag od 21 framea (`touch_exp.tracker_ball`). 21 je odabran tako da vanjske lopte dobiju
+agregatne brojke natjecateljske lopte iz `touch_diag` (p99 promjene brzine kroz 3 framea ~3.8 m/s,
+medijan udaljenosti do najbližeg igrača ~1.6 m naspram 1.88). Na tom regimu modeli učeni na
+čistim loptama padaju s 0.664 na 0.515, a dodiri (zaglađeni 1 s, učenje na čistim loptama) gube
+na svih 10 utakmica (0.497).
+
+| učenje | dodiri | `tracker` | čista lopta |
+|---|---|---|---|
+| A: čiste lopte | ne | 0.5146 | **0.6641** |
+| B: zaglađene lopte | ne | 0.6103 (+0.096, 10/10) | 0.5695 |
+| **C: zaglađene lopte** | da | **0.6272** (+0.113, 10/10) | 0.5837 |
+
+Svaki model je najbolji na loptama na kojima je učio. Natjecateljska lopta je po agregatnim
+brojkama zaglađena, pa je predana verzija C (tim se složio 2026-11-17): `augment.TRACKER_SMOOTH_W
+= 21` (korak 5 augmentacije, i za model momčadi i za dead model), dodiri uključeni. Provjereno da
+nova augmentacija daje identičnu loptu kao testirana verzija C. Najveća pretpostavka: oblik
+zaglađivanja natjecateljskog trackera poznajemo samo iz dvije agregatne brojke.

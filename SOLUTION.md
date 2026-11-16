@@ -39,6 +39,12 @@ Held-out spellF1 0.664 -> **0.703** (macroF1 0.922 -> 0.931), on 8 of 10 matches
 "Krug 3"). `python -m solution.touch_check` (run by a person: it reads the competition match)
 compares the touch rate there (14.7 per minute) with the external matches (15.9–22.5).
 
+Round 4 trains on the **competition's kind of ball** (`augment.TRACKER_SMOOTH_W = 21`, a trailing
+average set from aggregate statistics of that ball). On held-out matches with that smoothed ball,
+spellF1 0.515 -> **0.627** (with touches), 10 of 10 matches; on clean held-out balls it is
+0.664 -> 0.584, because the model is now trained for the competition ball
+(`python -m solution.smooth_train_exp`; docs/logo_external.md, "Krug 4").
+
 ## Reproduce
 
 Python 3.9 to 3.12 (numpy 2.0.2 has no 3.13 wheels), about 2 GB of free disk during the download

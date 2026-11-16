@@ -10,9 +10,13 @@ include detected ball touches, and P(ball out of play), from 16 player-movement 
 kick-off, which is found in the tracking, are forced dead. Every choice was made by
 leave-one-game-out on 10 external matches (3 Metrica, 7 IDSSE), scored with the organisers'
 metric library, under a written adoption rule. The competition match and its public 5 minutes
-chose nothing. On those 10 held-out matches the submitted configuration reaches spellF1
-**0.703** (macroF1 0.931), against 0.664 for the same pipeline without touch features, 0.644 for
-our earlier rule-based dead ball and 0.347 for the published baseline rule. The code is in `solution/`; the experiments are in
+chose nothing. The last step trains both models on a ball smoothed the way the competition tracker
+smooths its ball (one number, from aggregate statistics of that ball). On held-out matches given
+that same smoothed ball, the submitted configuration reaches spellF1 **0.627** (macroF1 0.918),
+against 0.515 for the same pipeline trained on clean balls without touches, better on 10 of 10
+matches. On clean held-out balls the order reverses (0.584 against 0.664): the model is trained
+for the competition's ball, not for clean ones. The published baseline rule scores 0.347 on
+clean held-out balls. The code is in `solution/`; the experiments are in
 [logo_external.md](logo_external.md) (current) and [experiments.md](experiments.md) (history).
 
 ## 1. Approach, and why
@@ -110,6 +114,34 @@ before the second-half kick-off live. The kick-off is found in the tracking, not
 docs: the players' set formation breaks with the ball inside the centre circle. It is detected at
 frame 113,750 against the documented 113,742.
 
+**Training on the competition's kind of ball (the last and largest step).** Touch detection
+first exposed it: the competition tracker smooths its ball path. Aggregate statistics of the two
+kinds of ball (`python -m solution.touch_diag`, run by a person: percentiles and rates only) show
+the competition ball's largest 3-frame velocity changes are a fifth of the external ones (p99 3.8
+against 16.8 m/s), and that it sits further from its nearest player (median 1.88 against 1.25 m) —
+a smoothed ball lags its player. A trailing average over 21 frames brings the external balls to
+~3.8 m/s and ~1.6 m. We then built a held-out regime, `tracker`: the external held-out matches with
+that smoothing. On it, the models trained on clean balls drop from 0.664 to **0.515** — the whole
+pipeline, not only touches, had learnt from a ball unlike ours.
+
+So `augment.py` now smooths the training ball the same way (step 5 of the augmentation), for the
+team model and the dead-ball model. Leave one game out, two seeds, decoded as submitted
+(`python -m solution.smooth_train_exp`):
+
+| trained on | touches | `tracker` held-out ball | clean held-out ball |
+|---|---|---|---|
+| clean balls (the configuration before this step) | off | 0.515 | **0.664** |
+| smoothed balls | off | 0.610 (10/10) | 0.570 |
+| **smoothed balls (submitted)** | on | **0.627** (10/10) | 0.584 |
+
+Each model is best on the kind of ball it was trained on. The competition ball is, by the
+aggregate statistics above, the smoothed kind, so the submission is trained on it. The smoothing
+width is one number for the whole match, set from aggregate statistics of the tracking with no
+frame-level information, the same kind of calibration as the ball-gap statistics behind
+`logo.gap_stats` / `logo.realistic`; the team agreed to it on the last day. It is our largest assumption: if
+the competition tracker smoothed its ball much less than these statistics say, the clean-ball
+configuration would be the better one.
+
 **Making clean training data look like ours.** The training matches have clean, often corrected
 tracking. Ours is automatic: according to DATA.md the ball is missing on 41% of graded frames, in
 long blocks, and about 20.5 of 22 players are tracked per frame. Before computing features, each
@@ -118,11 +150,12 @@ training match is changed, with a fixed seed:
 - short ball gaps (under 1 s) are bridged by interpolation;
 - the ball is hidden across 95% of stoppages;
 - long live-play gaps are cut until 5% of live frames have no ball;
-- players are dropped in random blocks covering 3% of frames.
+- players are dropped in random blocks covering 3% of frames;
+- the ball is smoothed with a 21-frame trailing average (the step above).
 
-The result is insensitive to these settings: every variant scored within ±0.01 of the reference.
-Training under harsher regimes, or with position noise, did not help either. Our guesses about the
-tracker do not drive the score.
+The first four settings barely matter: every variant scored within ±0.01 of the reference, and
+training under harsher regimes, or with position noise, did not help either. The fifth does
+matter, a lot, which is why it is calibrated to the aggregate statistics of the competition ball.
 
 **Switching team: a cost that depends on the evidence.** Changing team normally costs 20 log
 units. Within 10 frames of a "flip" it costs 0.4 × 20 = 8. A flip is a frame where the team
@@ -153,9 +186,14 @@ A hyperparameter chosen on held-out scores is judged on its nested estimate: cho
 scored on the 10th. The seed of the held-out degradation alone moves the mean by up to 0.011, so
 smaller differences are noise.
 
-| held-out, 10 matches, 2 seeds | spellF1 | Metrica (3) | IDSSE (7) | macroF1 | `harsh` | `lag` |
+The table below is on clean held-out balls, the yardstick of every round before the last; the
+submitted configuration is the one trained on smoothed balls (previous section: **0.627** on the
+`tracker` held-out ball against 0.515, but 0.584 on clean ones).
+
+| held-out, 10 matches, 2 seeds, clean ball | spellF1 | Metrica (3) | IDSSE (7) | macroF1 | `harsh` | `lag` |
 |---|---|---|---|---|---|---|
-| **submitted: + touch features**, ball smoothed 1 s | **0.703** | 0.790 | 0.665 | **0.931** | 0.666 | 0.687 |
+| submitted: smoothed training + touch features | 0.584 | 0.685 | 0.540 | 0.903 | | |
+| clean training + touch features, ball smoothed 1 s | 0.703 | 0.790 | 0.665 | 0.931 | 0.666 | 0.687 |
 | + sharp touch features (not submitted: blind on our ball) | 0.748 | 0.845 | 0.706 | 0.939 | 0.708 | 0.734 |
 | before touches (fixed settings) | 0.664 | 0.751 | 0.627 | 0.922 | 0.628 | 0.650 |
 | before touches, nested estimate | 0.662 | 0.749 | 0.625 | 0.922 | 0.627 | 0.648 |
@@ -163,13 +201,19 @@ smaller differences are noise.
 | 2 s dead-ball rule, switch cost 14 | 0.644 | 0.749 | 0.599 | 0.901 | 0.592 | 0.581 |
 | published baseline rule (nearest player, ±50-frame vote) | 0.347 | | | 0.799 | 0.328 | 0.343 |
 
-The submitted touch features (1 s smoothing) pass the adoption rule: default +0.039 on 8 of 10
+Touch features with 1 s smoothing (clean training) passed the adoption rule: default +0.039 on 8 of 10
 matches, `harsh` +0.038 (10/10), `lag` +0.037 (9/10), and +0.054 (10/10) under 20 cm of per-frame
 ball jitter (`python -m solution.touch_exp heavy`). They were added after round 2 and judged by the
 same rule; their thresholds were set on the external matches, and the competition match was used
 only for the go / no-go touch-rate check above. Per match (default regime, mean of two seeds),
 before → after: Metrica 0.756 → 0.819, 0.786 → 0.779, 0.711 → 0.771; IDSSE 0.582 → 0.638,
 0.579 → 0.632, 0.665 → 0.664, 0.603 → 0.645, 0.633 → 0.665, 0.668 → 0.706, 0.658 → 0.708.
+On the `tracker` held-out ball, though, that clean-trained touch model lost to the clean-trained
+model without touches on all 10 matches (0.497 against 0.515) — the result that led to the last
+step. Trained on smoothed balls, touches help again there: 0.627 against 0.610 without them.
+Per match on the `tracker` ball, clean training without touches → submitted: Metrica 0.568 →
+0.721, 0.545 → 0.739, 0.556 → 0.678; IDSSE 0.445 → 0.545, 0.443 → 0.534, 0.505 → 0.646,
+0.485 → 0.560, 0.545 → 0.618, 0.525 → 0.633, 0.528 → 0.598.
 
 Before touches, round 2 beat the rule-based version on 9 of 10 matches, and the version before
 round 2 on all 10. Under simulated smooth position noise (players 0.25–0.5 m, ball 0.5–1 m, an
@@ -208,9 +252,12 @@ which a light 0.2 s smoothing turned into +0.108.
 **The public 5 minutes.** The public window is used only to check that the file is correct: teams
 not swapped, frames aligned, a sensible possession count. Every setting of the submitted
 configuration was chosen by the external harness (section 1). Scored once as that check, the
-submitted file has spellF1 TODO-PUBLIC-SPELL / macroF1 TODO-PUBLIC-MACRO (before touch features:
-0.600 / 0.720, with 15 possessions against 17 in the truth); the smoothed published baseline
-scores 0.326 / 0.621.
+submitted file has spellF1 0.503 / macroF1 0.707, with 14 possessions against 17 in the truth and
+team accuracy 0.92 where both are alive. The configuration before the last two steps (clean-ball
+training, no touches) scores 0.600 / 0.720 there, with 15 possessions; the smoothed published
+baseline scores 0.326 / 0.621. Per frame the two are level (team accuracy 0.925 against 0.931,
+dead-ball F1 0.912 for both); the spellF1 gap is one or two of the 17 possessions, and the window
+did not decide between them — the `tracker` regime on 10 external matches did.
 With 17 possessions one possession moves spellF1 by about six points, so this confirms
 correctness, not a ranking.
 
@@ -299,10 +346,11 @@ Here is where our system draws those lines.
 - **Too few short possessions.** On the held-out matches we predict about 321 possessions where
   the labels have 412 (307 before touch features). Most of the remaining error is in fast
   exchanges.
-- **Our tracker blurs touches.** The competition ball path is smoothed, so we detect touches on a
-  ball smoothed over 1 s everywhere. That keeps the detector working on our match, but halves its
-  gain on the external ones (0.703 instead of 0.748). Two touches within a second merge, and a
-  smoothed ball lags its player.
+- **Our tracker smooths its ball, and we model that from aggregates.** We train on a ball smoothed
+  to match aggregate statistics of the competition ball. The match is the closest thing to that
+  regime we can test on, but not the same: if the tracker's smoothing differs in shape (a Kalman
+  filter rather than a trailing average, say), part of the gain could be lost. Touches are blurred
+  too: two touches within a second merge, and a smoothed ball lags its player.
   - Fix: run our own ball detector on the tactical video to get a sharp ball track.
 - Without ball height, a header and a ground pass look alike.
 

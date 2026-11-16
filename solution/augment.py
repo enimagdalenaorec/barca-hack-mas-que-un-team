@@ -13,7 +13,17 @@ So, per training match, with a fixed seed so the training set is reproducible:
      HIDE_DEAD_P, the way ours vanishes when play stops;
   3. extra live-play ball gaps are cut until LIVE_GAP_SHARE of live frames have no ball, with
      lengths drawn from LIVE_GAP_S -- our long, rare live losses;
-  4. each player is dropped for random blocks covering PLAYER_DROP_SHARE of frames.
+  4. each player is dropped for random blocks covering PLAYER_DROP_SHARE of frames;
+  5. the ball is smoothed the way the competition tracker smooths it: a trailing average over
+     TRACKER_SMOOTH_W frames. Aggregate statistics of the competition ball (python -m
+     solution.touch_diag, run by a person) show its velocity changes are a fifth of the external
+     ones (99th percentile of the 3-frame change 3.8 against 16.8 m/s) and that it sits further
+     from its nearest player (median 1.88 against 1.25 m). 21 frames bring the external balls to
+     ~3.8 m/s and ~1.6 m. One number for the whole match, from aggregates, no frame-level
+     information; agreed by the team on 2026-11-17. Leave one game out on held-out matches
+     with that ball (python -m solution.smooth_train_exp): spellF1 0.515 -> 0.627 with touch
+     features, 10 of 10 matches. On clean held-out balls it is the other way round (0.664 ->
+     0.584): the model is now trained for the competition ball.
 
 Not added by default: per-frame position noise. Independent jitter on every frame turns into
 fake ball speed, because ball speed is computed from positions.
@@ -34,8 +44,9 @@ LIVE_GAP_SHARE = 0.05
 LIVE_GAP_S = (2.0, 15.0)
 PLAYER_DROP_SHARE = 0.03
 PLAYER_DROP_S = (1.0, 10.0)
+TRACKER_SMOOTH_W = 21  # frames of trailing average on the ball; 1 = off (see step 5 above)
 PARAMS = ("BRIDGE_S", "HIDE_DEAD_P", "LIVE_GAP_SHARE", "LIVE_GAP_S", "PLAYER_DROP_SHARE",
-          "PLAYER_DROP_S")
+          "PLAYER_DROP_S", "TRACKER_SMOOTH_W")
 # Named overrides of the settings above, for training and for degrading held-out matches.
 # "harsh": more and longer live-play ball gaps, fewer hidden stoppages.
 REGIMES = {"default": {},
@@ -107,6 +118,21 @@ def augment(arrays, seed, params=None):
             players[start:start + length, slot] = np.nan
             budget -= length
 
+    ball = ball.astype(np.float32).astype(np.float64)
+    if p["TRACKER_SMOOTH_W"] > 1:
+        ball = trailing_mean(ball, int(p["TRACKER_SMOOTH_W"]))
     out["ball_xy"] = ball.astype(np.float32)
     out["players_xy"] = players.astype(np.float32)
     return out
+
+
+def trailing_mean(ball, w):
+    """Mean of the ball over the last w frames; missing unless all w frames (and this one) are
+    seen, so a gap never smears into the path."""
+    n = len(ball)
+    cs = np.concatenate([np.zeros((1, 2)), np.cumsum(np.nan_to_num(ball), axis=0)])
+    cn = np.concatenate([[0], np.cumsum(~np.isnan(ball[:, 0]))])
+    hi = np.arange(1, n + 1)
+    lo = np.maximum(0, hi - w)
+    full = ((cn[hi] - cn[lo]) == hi - lo) & ~np.isnan(ball[:, 0])
+    return np.where(full[:, None], (cs[hi] - cs[lo]) / (hi - lo)[:, None], np.nan)
