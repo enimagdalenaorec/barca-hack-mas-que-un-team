@@ -4,7 +4,7 @@
 
 The alternative to solution/dead_ball.py's "ball missing for 2 s" rule. Same recipe as the team
 model (solution/model.py): gradient-boosted trees, the same GBM settings, every graded frame of
-every match with a dead-ball label, augmented with the same seed so the ball gaps look like ours,
+every match with a dead-ball label, augmented with the same seed and settings (solution/augment.py),
 subsampled. Features: solution/dead_features.py. Decoded together with P(home) by
 decode.viterbi3 (model.labels_from3).
 """

@@ -20,6 +20,10 @@ stoppage the visible-ball frames outvote the dead ones: every stoppage shrinks b
 both ends and any stoppage shorter than twice the window disappears. Deciding dead first, then
 smoothing inside each live stretch, keeps stoppages exactly where the tracking puts them.
 
+With --dead model (the default) step 1 is not taken alone: a learned P(dead) and P(home) are
+decoded together by one home / away / dead Viterbi per half (solution/dead_model.py,
+decode.viterbi3); frames before the detected kick-off are forced dead.
+
 Frames outside the graded halves are written X.
 """
 
@@ -39,7 +43,10 @@ from solution.diagnostics import graded_runs  # noqa: E402
 RESULTS_DIR = os.path.join(ROOT, "evaluation", "results")
 WINDOW = 50  # +/- frames; the published floor's value, kept so the comparison changes one thing
 HOME, AWAY, NOBODY = 0, 1, -1
-DEAD = "rule"  # dead-ball method of the model path: "rule" or "model" (solution/experiments.py, dead)
+# Dead-ball method of the model path: "model" (learned P(dead) + one H/A/D Viterbi per half) or
+# "rule" (ball missing >= 2 s). "model" beats the rule on held-out spellF1 under every ball-gap
+# regime tried on the 10 external matches (python -m solution.logo dead; docs/logo_external.md, b).
+DEAD = "model"
 
 
 def nearest_team(arrays):

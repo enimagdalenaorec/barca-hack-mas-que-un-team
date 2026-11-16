@@ -49,6 +49,9 @@ GBM = dict(max_iter=600, learning_rate=0.1, max_leaf_nodes=63, min_samples_leaf=
 # on 7 of 7 (solution/experiments.py, mix). Its labels come from SkillCorner's own software and
 # its tracking from a broadcast feed at 10 fps; both are further from our target than the rest.
 SOURCES = ("idsse",)
+# Which converted IDSSE matches train the submission model (None = all that are converted).
+# The original 4 (two per division) until the leave-one-game-out comparison decides otherwise.
+IDSSE_TRAIN = ("J03WMX", "J03WN1", "J03WOH", "J03WOY")
 # How the training matches are degraded before training (solution/augment.py REGIMES).
 AUG_REGIME = "default"
 # Training labels as "controlled" possession (CHALLENGE.md): the other team must hold the ball
@@ -61,7 +64,8 @@ def training_matches(control_s=None):
     relabelled to controlled possession when control_s (default CONTROL_S) is set."""
     out = [("metrica{}".format(n), sample_games.load(n)) for n in sample_games.GAMES]
     for source, match in download_external.converted():
-        if source in SOURCES:
+        if source in SOURCES and (source != "idsse" or IDSSE_TRAIN is None
+                                  or match in IDSSE_TRAIN):
             out.append(("{}_{}".format(source, match), external_games.load(source, match)))
     control_s = CONTROL_S if control_s is None else control_s
     if control_s:

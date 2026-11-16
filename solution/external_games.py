@@ -21,7 +21,8 @@ load(source, match_id) returns the keys of solution.tracking.load() plus:
     owner     (N,) int8        0 home, 1 away, -1 unknown
     has_dead  ()   int         1 if `dead` is a real label for this source
 
-Converted files go to data/cache/ (gitignored). The raw downloads are deleted after conversion by
+Converted files go to data/external/cache/ (gitignored). Raw files already in
+data/external/idsse/ are read in place and kept; raw downloads are deleted after conversion by
 solution/download_external.py, so only these compact arrays stay on disk.
 """
 
@@ -38,10 +39,21 @@ from games import DATA_DIR  # noqa: E402
 
 # Params
 RAW_DIR = os.path.join(DATA_DIR, "external", "raw")
-CACHE_DIR = os.path.join(DATA_DIR, "cache")
+# IDSSE files already on disk under their original names; read in place of a download.
+LOCAL_IDSSE_DIR = os.path.join(DATA_DIR, "external", "idsse")
+# Converted training arrays live apart from anything computed from the competition match.
+CACHE_DIR = os.path.join(DATA_DIR, "external", "cache")
 CACHE_VERSION = 1
 FPS = 25
 UNKNOWN = -1
+
+
+def local_idsse(competition, match_id):
+    """(info, positions) paths of an IDSSE match in LOCAL_IDSSE_DIR, or None if either is absent."""
+    stem = "{}_DFL-MAT-{}.xml".format(competition, match_id)
+    paths = (os.path.join(LOCAL_IDSSE_DIR, "DFL_02_01_matchinformation_" + stem),
+             os.path.join(LOCAL_IDSSE_DIR, "DFL_04_03_positions_raw_observed_" + stem))
+    return paths if all(os.path.isfile(p) for p in paths) else None
 
 
 def cache_path(source, match_id):

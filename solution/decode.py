@@ -15,16 +15,14 @@ import numpy as np
 
 # Params
 EPS = 1e-4  # keeps log() finite for a model that is (over)confident
-# Held-out mean spellF1 over 7 labelled training matches, final model
-# (python -m solution.model --evaluate):
-#   cost 2: 0.592   4: 0.630   6: 0.642   8: 0.643   10: 0.645   14: 0.647   20: 0.640   30: 0.624
-# Chosen on the 3 Metrica matches only, whose labels are closest to the public ground truth's
-# granularity, by a rule fixed before the run (python -m solution.experiments switch;
-# docs/experiments.md, 14): 14 beats 10 on 3 of 3 (0.744 vs 0.739) and on the all-7 mean.
+# Chosen on the 10 external matches only (3 Metrica + 7 IDSSE), leave one game out
+# (python -m solution.logo switch; docs/logo_external.md, e): 14 has the best held-out mean over
+# the grid 6-60, and a nested choice (pick on 9 matches, score the 10th) picks 14 in 10 of 10 folds.
 SWITCH_COST = 14.0
-# Three-state decoder (viterbi3, pipeline --dead model): leaving play for a stoppage, and coming
-# back. Best mean held-out spellF1 under the calibrated regime (python -m solution.experiments
-# dead); the grid over {4, 8, 12, 20}^2 is flat, 0.657-0.659.
+# Three-state decoder (viterbi3, the default dead-ball path of the submission): leaving play
+# for a stoppage, and coming back. Leave one game out on the 10 external matches
+# (python -m solution.logo dead; docs/logo_external.md, b): the stop x restart grid is flat
+# (within 0.002), and a nested choice (pick on 9, score the 10th) scores the same as 20 / 8.
 STOP_COST = 20.0
 RESTART_COST = 8.0
 

@@ -10,7 +10,7 @@ import numpy as np
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-from solution import augment, dead_ball, dead_features, dead_model, decode, gap_stats, model  # noqa: E402
+from solution import augment, dead_ball, dead_features, dead_model, decode, model  # noqa: E402
 
 FPS = 25
 LIVE_BLOCK, DEAD_BLOCK = 400, 150
@@ -113,23 +113,6 @@ def test_dead_model_learns_synthetic_stoppages():
     p = dead_model.p_dead(clf, m[2][1], m[2][1]["runs"])
     dead = m[2][1]["dead"]
     assert np.nanmean(p[dead]) > np.nanmean(p[~dead]) + 0.3
-
-
-def test_calibrated_all_gaps_dead_gives_no_live_gaps():
-    train = [synthetic_match(5500, with_labels=True, seed=s) for s in range(2)]
-    ours = dict(train[0])
-    ours["ball_xy"] = ours["ball_xy"].copy()  # gaps only on dead blocks
-    out = gap_stats.calibrated(ours, ours["runs"], train)
-    assert out["LIVE_GAP_SHARE"] < 0.01 and out["LIVE_GAP_S"] == (2.0, 15.0)  # < 5 fast gaps
-
-
-def test_calibrated_live_gaps_raise_share():
-    train = [synthetic_match(5500, with_labels=True, seed=s) for s in range(2)]
-    ours = synthetic_match(5500, seed=7)  # moving players everywhere
-    for a in range(0, 5500, 500):
-        ours["ball_xy"][a:a + 150] = np.nan  # 11 fast 6 s gaps
-    out = gap_stats.calibrated(ours, [(0, 5500)], train)
-    assert out["LIVE_GAP_SHARE"] > 0.2 and 5.0 <= out["LIVE_GAP_S"][0] <= out["LIVE_GAP_S"][1] <= 7.0
 
 
 def test_controlled_merges_short_opposing_spell():
