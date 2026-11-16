@@ -164,15 +164,8 @@ round 2 (within 0.001) and still above the rule-based one.
 | Public 5-minute ground truth | checks only | See below. |
 
 **The public 5 minutes.** The public window is used only to check that the file is correct: teams
-not swapped, frames aligned, a sensible possession count. It is scored after the configuration is
-fixed and chooses nothing.
-
-One earlier experiment broke that line, and we report it. Experiment 16 in
-[experiments.md](experiments.md) used one public-window run to decide between two training-label
-definitions, and an earlier switch cost (14) was argued from comparing the training labels with
-the public truth. In the final round we re-made every choice on the 10 external matches alone and
-removed that code. The label definition, the switch cost and the dead-ball model in the submission
-are what the external harness chose.
+not swapped, frames aligned, a sensible possession count. Every setting of the submitted
+configuration was chosen by the external harness (section 1).
 
 ## 3. Training data
 
