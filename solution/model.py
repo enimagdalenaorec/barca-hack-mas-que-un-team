@@ -15,7 +15,8 @@ whole pipeline -- our dead-ball rule on the augmented ball, the model, then Vite
 The same is done for the published baseline rule (nearest player, +/-50 vote) so the two can be
 compared on matches neither has seen. SkillCorner matches only ever train (no dead-ball label).
 
-The Viterbi switch cost is chosen here, as the value with the best mean held-out spellF1.
+The Viterbi switch cost is scored here; it is chosen on the Metrica matches only
+(python -m solution.experiments switch, docs/experiments.md 14).
 """
 
 import argparse
@@ -48,14 +49,45 @@ GBM = dict(max_iter=600, learning_rate=0.1, max_leaf_nodes=63, min_samples_leaf=
 # on 7 of 7 (solution/experiments.py, mix). Its labels come from SkillCorner's own software and
 # its tracking from a broadcast feed at 10 fps; both are further from our target than the rest.
 SOURCES = ("idsse",)
+# Which converted IDSSE matches train the submission model (None = all that are converted).
+# The original 4 (two per division) until the leave-one-game-out comparison decides otherwise.
+IDSSE_TRAIN = ("J03WMX", "J03WN1", "J03WOH", "J03WOY")
+# How the training matches are degraded before training (solution/augment.py REGIMES).
+AUG_REGIME = "default"
+# Training labels as "controlled" possession (CHALLENGE.md): the other team must hold the ball
+# this many seconds in a row for possession to change. None = the sources' own labels.
+CONTROL_S = None
 
 
-def training_matches():
-    """[(name, arrays)] for every match we train on: Metrica + the sources in SOURCES."""
+def training_matches(control_s=None):
+    """[(name, arrays)] for every match we train on: Metrica + the sources in SOURCES, labels
+    relabelled to controlled possession when control_s (default CONTROL_S) is set."""
     out = [("metrica{}".format(n), sample_games.load(n)) for n in sample_games.GAMES]
     for source, match in download_external.converted():
-        if source in SOURCES:
+        if source in SOURCES and (source != "idsse" or IDSSE_TRAIN is None
+                                  or match in IDSSE_TRAIN):
             out.append(("{}_{}".format(source, match), external_games.load(source, match)))
+    control_s = CONTROL_S if control_s is None else control_s
+    if control_s:
+        frames = int(round(control_s * dead_ball.FPS))
+        out = [(name, {**a, "owner": controlled(a["owner"], a["dead"], a["runs"], frames)})
+               for name, a in out]
+    return out
+
+
+def controlled(owner, dead, runs, min_frames):
+    """Owner per frame, changing team only when the other team holds the ball for at least
+    min_frames in a row inside a live stretch; its shorter spells (touches, deflections, duels,
+    loose balls) go to the team that had it. The first spell after a restart stands."""
+    out = owner.copy()
+    for start, stop in dead_ball.stretches(~dead, runs):
+        seg = owner[start:stop]
+        bounds = np.concatenate(([0], np.flatnonzero(np.diff(seg)) + 1, [len(seg)]))
+        current = seg[0]
+        for a, b in zip(bounds[:-1], bounds[1:]):
+            if seg[a] != current and b - a >= min_frames:
+                current = seg[a]
+            out[start + a:start + b] = current
     return out
 
 
@@ -66,18 +98,25 @@ def seed_of(name):
 _ROWS = {}
 
 
-def rows(name, arrays):
+def params_key(params):
+    """Hashable form of an augment params dict, for memo keys."""
+    return tuple(sorted((params or {}).items()))
+
+
+def rows(name, arrays, params=None):
     """(X, y) training rows of one match: augmented, both team views, live frames, subsampled.
 
-    Memoised per match, because leave-one-out refits on the same matches many times.
+    Memoised per match and augment params, because leave-one-out refits on the same matches many
+    times.
     """
-    if name not in _ROWS:
-        _ROWS[name] = _rows(name, arrays)
-    return _ROWS[name]
+    key = (name, params_key(params))
+    if key not in _ROWS:
+        _ROWS[key] = _rows(name, arrays, params)
+    return _ROWS[key]
 
 
-def _rows(name, arrays):
-    aug = augment.augment(arrays, seed_of(name))
+def _rows(name, arrays, params=None):
+    aug = augment.augment(arrays, seed_of(name), params)
     owner = arrays["owner"]
     keep = owner >= 0
     if int(arrays["has_dead"]):
@@ -91,8 +130,8 @@ def _rows(name, arrays):
     return np.concatenate(xs), np.concatenate(ys)
 
 
-def fit(matches):
-    parts = [rows(name, arrays) for name, arrays in matches]
+def fit(matches, params=None):
+    parts = [rows(name, arrays, params) for name, arrays in matches]
     X = np.concatenate([p[0] for p in parts])
     y = np.concatenate([p[1] for p in parts])
     return HistGradientBoostingClassifier(**GBM).fit(X, y)
@@ -120,6 +159,58 @@ def labels_from(p, arrays, runs, switch_cost):
     for start, stop in dead_ball.stretches(live, runs):
         path = decode.viterbi(p[start:stop], switch_cost)
         codes[start:stop] = np.where(path == 0, pm.H, pm.A)
+    return codes
+
+
+def nearest_distances(arrays, runs):
+    """(home, away): distance from the ball to each team's nearest player per frame; NaN where
+    the ball or the whole team is missing, and outside the runs."""
+    ball = arrays["ball_xy"].astype(np.float64)
+    players = arrays["players_xy"].astype(np.float64)
+    dist = np.sqrt(np.square(players - ball[:, None, :]).sum(-1))
+    inside = np.zeros(len(ball), dtype=bool)
+    for start, stop in runs:
+        inside[start:stop] = True
+    out = []
+    for side in (0, 1):
+        d = np.where(np.isnan(dist[:, arrays["slot_team"] == side]), np.inf,
+                     dist[:, arrays["slot_team"] == side]).min(axis=1)
+        out.append(np.where(np.isinf(d) | ~inside, np.nan, d))
+    return out[0], out[1]
+
+
+def labels_from3(p_home, p_dead, arrays, runs, costs, flip="default", dead_temperature="default"):
+    """Codes H/A/D/X for a whole match: one three-state Viterbi per run (decode.viterbi3), frames
+    before the detected kick-off forced dead. costs = (switch, stop, restart).
+
+    flip: None, or (factor, radius_m, window) -- the switch cost is multiplied by factor near a
+    flip of the team nearest the ball (decode.flip_frames). dead_temperature: None, or T for
+    decode.tempered on p_dead. "default" reads decode.FLIP_FACTOR / FLIP_RADIUS_M / FLIP_WINDOW
+    and decode.DEAD_TEMPERATURE, which are off unless set there."""
+    if flip == "default":
+        flip = None if decode.FLIP_FACTOR is None else (
+            decode.FLIP_FACTOR, decode.FLIP_RADIUS_M, decode.FLIP_WINDOW)
+    if dead_temperature == "default":
+        dead_temperature = decode.DEAD_TEMPERATURE
+    forced = dead_ball.pre_kickoff_mask(arrays, runs)
+    codes = np.full(len(p_home), pm.X, dtype=np.int8)
+    letters = np.array([pm.H, pm.A, pm.D], dtype=np.int8)
+    if flip is None and dead_temperature is None:
+        for start, stop in runs:
+            path = decode.viterbi3(p_dead[start:stop], p_home[start:stop], forced[start:stop],
+                                   *costs)
+            codes[start:stop] = letters[path]
+        return codes
+    if dead_temperature is not None:
+        p_dead = decode.tempered(p_dead, dead_temperature)
+    switch = np.full(len(p_home), float(costs[0]))
+    if flip is not None:
+        factor, radius_m, window = flip
+        switch[decode.flip_frames(*nearest_distances(arrays, runs), radius_m, window)] *= factor
+    for start, stop in runs:
+        path = decode.viterbi3(p_dead[start:stop], p_home[start:stop], forced[start:stop],
+                               switch[start:stop], costs[1], costs[2])
+        codes[start:stop] = letters[path]
     return codes
 
 
@@ -197,32 +288,35 @@ def learning_curve(matches, sizes=(3, 6, 9, 11), seed=0):
     return curve
 
 
-def fingerprint(matches):
+def fingerprint(matches, params=None):
     """Everything the saved model depends on. A saved model with another fingerprint is stale."""
     names = features.compute(matches[0][1], matches[0][1]["runs"][:1])[0]
+    touch = {k: getattr(features, k) for k in dir(features) if k.startswith(("TOUCH", "CTRL"))}
     return {"features": names, "gbm": GBM, "matches": [name for name, _ in matches],
-            "augment": {k: getattr(augment, k) for k in dir(augment) if k.isupper()},
-            "subsample": SUBSAMPLE}
+            "augment": augment.settings(params), "subsample": SUBSAMPLE, "control_s": CONTROL_S,
+            "touch": touch}
 
 
-def train_and_save(matches=None):
+def train_and_save(matches=None, params=None):
     matches = matches or training_matches()
-    model = fit(matches)
+    params = augment.regime(AUG_REGIME) if params is None else params
+    model = fit(matches, params)
     with open(MODEL_PATH, "wb") as handle:
-        pickle.dump({"model": model, "fingerprint": fingerprint(matches)}, handle)
+        pickle.dump({"model": model, "fingerprint": fingerprint(matches, params)}, handle)
     return model
 
 
-def load_or_train():
+def load_or_train(params=None):
     """The saved model if it was trained exactly as the code now would, else a fresh one.
     Training is seeded, so a fresh clone with the same data rebuilds the same model."""
     matches = training_matches()
+    params = augment.regime(AUG_REGIME) if params is None else params
     if os.path.isfile(MODEL_PATH):
         with open(MODEL_PATH, "rb") as handle:
             saved = pickle.load(handle)
-        if isinstance(saved, dict) and saved.get("fingerprint") == fingerprint(matches):
+        if isinstance(saved, dict) and saved.get("fingerprint") == fingerprint(matches, params):
             return saved["model"]
-    return train_and_save(matches)
+    return train_and_save(matches, params)
 
 
 if __name__ == "__main__":

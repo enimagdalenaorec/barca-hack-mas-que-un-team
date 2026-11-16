@@ -2,8 +2,10 @@
 
 These are OTHER games, so RULES.md allows tuning on them freely. They come from
 https://github.com/metrica-sports/sample-data (no licence file; the README asks for responsible use
-and acknowledgement, which the technical document gives). python -m solution.download_external
-fetches them into data/sample/, converts them and deletes the raw files:
+and acknowledgement, which the technical document gives). Raw files already in
+data/external/metrica/Sample_Game_N/ are read in place and kept; otherwise
+python -m solution.download_external fetches them into data/sample/, converts them and deletes
+the raw files:
 
     data/sample/Sample_Game_1/Sample_Game_1_RawEventsData.csv
     data/sample/Sample_Game_1/Sample_Game_1_RawTrackingData_{Home,Away}_Team.csv
@@ -42,8 +44,12 @@ sys.path.insert(0, ROOT)
 from games import DATA_DIR  # noqa: E402
 
 # Params
-SAMPLE_DIR = os.path.join(DATA_DIR, "sample")
-CACHE_DIR = os.path.join(DATA_DIR, "cache")
+# Raw sample games: data/external/metrica/ when the files are already there (then nothing is
+# downloaded or deleted), else data/sample/, where solution/download_external.py fetches them.
+LOCAL_DIR = os.path.join(DATA_DIR, "external", "metrica")
+SAMPLE_DIR = LOCAL_DIR if os.path.isdir(LOCAL_DIR) else os.path.join(DATA_DIR, "sample")
+# Converted training arrays live apart from anything computed from the competition match.
+CACHE_DIR = os.path.join(DATA_DIR, "external", "cache")
 CACHE_VERSION = 3
 FPS = 25
 PITCH = (105.0, 68.0)  # README: both CSV games are 105 x 68 m; game 3's metadata says the same

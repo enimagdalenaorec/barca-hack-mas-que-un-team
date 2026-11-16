@@ -8,13 +8,17 @@
     python -m solution.experiments augment     # 6: sensitivity to the augmentation guesses
     python -m solution.experiments stacking    # 7: a second model over the first one's guesses
     python -m solution.experiments budget      # where are the remaining points?
+    python -m solution.experiments switch      # 14: switch cost chosen on Metrica only
 
 Each held-out match is one of the 7 with a full H/A/D label (Metrica, IDSSE); the model is
 trained on the other 11 matches every time. Results are the mean over the 7 and, against the
 reference configuration, on how many of the 7 a variant is better -- with 7 matches a difference
 under ~0.01-0.02 spellF1 is noise unless it wins on most of them.
 
-Nothing here touches the competition match.
+Nothing here reads the competition match or any ground truth of it. Experiments 12 (training
+labels vs the public window) and 13/13a (ball-gap statistics of the competition match) were
+removed: the public window must never choose between versions (EVALUATION.md), and every choice
+is made on external matches only. Their replacement is solution/logo.py (10 external matches).
 """
 
 import os
@@ -594,8 +598,126 @@ def exp_budget(p):
     }, "ours")
 
 
+# -- label granularity -------------------------------------------------------------------------
+
+def granularity(codes):
+    """Possession statistics of one label sequence, scored the way the metric sees it (runs from
+    the non-X frames): possessions and direct H<->A turnovers per live minute, median possession
+    length (s), share of possessions under 1 s and under 3 s."""
+    runs = pm.valid_runs(codes)
+    segs = pm.segments(codes, runs)
+    poss = np.array([(b - a) / M.dead_ball.FPS for a, b, k in segs if k in (pm.H, pm.A)])
+    live_min = poss.sum() / 60.0
+    direct = sum(1 for (_, b1, k1), (a2, _, k2) in zip(segs, segs[1:])
+                 if b1 == a2 and {k1, k2} == {pm.H, pm.A})
+    return (len(poss) / live_min, float(np.median(poss)), float(np.mean(poss < 1)),
+            float(np.mean(poss < 3)), direct / live_min, len(poss))
+
+
+SWITCH_GRID = (6, 8, 10, 14, 20, 30, 40, 60, 80)
+
+
+def exp_switch():
+    """Switch cost chosen on the 3 Metrica held-out matches only. Rule pre-registered in docs/experiments.md,
+    section 14; the decision is printed, not applied."""
+    p = predictions()
+    metrica = [n for n in p if n.startswith("metrica")]
+    per, granul = {}, {}
+    for cost in SWITCH_GRID:
+        codes = {n: decode_match(n, q, cost=cost) for n, q in p.items()}
+        per[cost] = score_all(codes)
+        granul[cost] = np.mean([granularity(codes[n])[0] for n in metrica])
+    truth = np.mean([granularity(held_out(n, dict(labelled())[n])["gt"])[0] for n in metrica])
+
+    def mean(cost, names):
+        return float(np.mean([per[cost][n][0] for n in names]))
+
+    print("\nswitch cost  metrica spellF1  wins of 3 vs 10  all-7 spellF1  idsse spellF1  "
+          "metrica poss/min (truth {:.2f})".format(truth))
+    for cost in SWITCH_GRID:
+        wins = sum(per[cost][n][0] > per[10][n][0] + 1e-9 for n in metrica)
+        print("  {:<10} {:>15.3f} {:>16} {:>14.3f} {:>14.3f} {:>16.2f}".format(
+            cost, mean(cost, metrica), wins, mean(cost, p), mean(cost, [n for n in p if n not in metrica]),
+            granul[cost]))
+    best = max(SWITCH_GRID, key=lambda c: mean(c, metrica))
+    wins = sum(per[best][n][0] > per[10][n][0] + 1e-9 for n in metrica)
+    drop = mean(10, p) - mean(best, p)
+    adopt = best != 10 and wins >= 2 and drop <= 0.01
+    print("\nc_M = {}: (a) not 10: {}  (b) wins {} of 3: {}  (c) all-7 drop {:.3f}: {}  -> {}".format(
+        best, best != 10, wins, wins >= 2, drop, drop <= 0.01,
+        "ADOPT" if adopt else "keep 10"))
+    return per, best, adopt
+
+
+BIGGER = ((1000, 63), (600, 127), (1000, 127))  # (max_iter, max_leaf_nodes)
+
+
+def exp_bigger():
+    """Larger boosting models than the current 600 trees / 63 leaves, decoded at the current
+    switch cost. Rule pre-registered in docs/experiments.md, section 15."""
+    def make(iters, leaves):
+        return lambda: HistGradientBoostingClassifier(
+            **{**M.GBM, "max_iter": iters, "max_leaf_nodes": leaves})
+
+    variants = {}
+    for iters, leaves in ((M.GBM["max_iter"], M.GBM["max_leaf_nodes"]),) + BIGGER:
+        p = predictions(make_model=make(iters, leaves))
+        variants["{} trees / {} leaves".format(iters, leaves)] = score_all(
+            {n: decode_match(n, q) for n, q in p.items()})
+        print("  done {} / {}".format(iters, leaves), flush=True)
+    reference = "{} trees / {} leaves".format(M.GBM["max_iter"], M.GBM["max_leaf_nodes"])
+    table("exp 15 -- bigger team model (switch cost {:g})".format(decode.SWITCH_COST),
+          variants, reference)
+    ref = variants[reference]
+    best = max(variants, key=lambda k: np.mean([v[0] for v in variants[k].values()]))
+    wins = sum(variants[best][n][0] > ref[n][0] + 1e-9 for n in ref)
+    better = np.mean([v[0] for v in variants[best].values()]) > np.mean([v[0] for v in ref.values()])
+    print("\nbest: {}; beats the reference on the mean: {}; wins {} of 7 -> {}".format(
+        best, better, wins, "ADOPT" if best != reference and better and wins >= 5 else "keep"))
+
+
+CONTROL_T = (1.0, 2.0, 3.0)  # T = 2 s is the pre-registered one; 1 and 3 for robustness
+CONTROL_COSTS = (2, 4, 6, 8, 10, 14, 20, 30, 40)
+
+
+def exp_control():
+    """Training labels relabelled to controlled possession (model.controlled), held-out truth
+    relabelled the same way, switch cost re-chosen on all 7. Rule pre-registered in
+    docs/experiments.md, section 16. Scores compare costs within one T, never across T."""
+    for t in CONTROL_T:
+        M._ROWS.clear()  # rows memo is keyed by match name; labels differ per T
+        ms = M.training_matches(control_s=t)
+        lab = [m for m in ms if int(m[1]["has_dead"])]
+        stats = {src: np.mean([granularity(M.truth_codes(a))[:5] for n, a in lab
+                               if n.startswith(src)], axis=0) for src in ("metrica", "idsse")}
+        res = {c: [] for c in CONTROL_COSTS}
+        for name, arrays in lab:
+            clf = M.fit([m for m in ms if m[0] != name])
+            held = augment.augment(arrays, M.seed_of(name) + 1)
+            p = M.p_home(clf, held, arrays["runs"])
+            gt = M.truth_codes(arrays)
+            for c in CONTROL_COSTS:
+                res[c].append(M.score(gt, M.labels_from(p, held, arrays["runs"], c))[0])
+        best = max(CONTROL_COSTS, key=lambda c: np.mean(res[c]))
+        print("\nT = {:g} s: relabelled truth, possessions / live min, median s, direct / live min"
+              .format(t))
+        for src, g in stats.items():
+            print("  {:<8} {:.2f}  {:.1f}  {:.2f}".format(src, g[0], g[1], g[4]))
+        print("  held-out spellF1 by switch cost: " + "  ".join(
+            "{}: {:.3f}".format(c, np.mean(res[c])) for c in CONTROL_COSTS))
+        print("  best cost {} -> {:.3f} (metrica {:.3f}, idsse {:.3f})".format(
+            best, np.mean(res[best]), np.mean(res[best][:3]), np.mean(res[best][3:])), flush=True)
+    M._ROWS.clear()
+
+
 if __name__ == "__main__":
     which = sys.argv[1:] or ["timing", "decoding"]
+    if "switch" in which:
+        exp_switch()
+    if "bigger" in which:
+        exp_bigger()
+    if "control" in which:
+        exp_control()
     if "features" in which:
         exp_features()
     if "mix" in which:

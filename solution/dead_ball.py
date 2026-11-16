@@ -17,10 +17,6 @@ separates the two:
 Tried and dropped, also on the sample games: adding frames where the ball is seen outside the
 lines (dead F1 down on two games of three, ~15 extra fake stoppages each).
 
-On the competition match the same evidence points the same way, without any ground truth: the
-ball is missing in 150 long blocks rather than in flickers, players move at half speed during
-them (1.2 vs 2.2 m/s), and 45 of 59 Smart Tagging set pieces are taken just as a gap ends.
-
 Second rule: **nothing is live before a half's kick-off.** The competition grades the second half
 from frame 110,808 but it kicks off at 113,742 (FAQ.md); the ball is tracked while it is placed on
 the centre spot, so the first rule alone called 82% of those frames live. The kick-off is found in
@@ -31,8 +27,7 @@ after the set formation has held for KICKOFF_HOLD_S, where the share of players 
 in the first KICKOFF_SEARCH_S of a half. A share rather than "everyone" because the tracker
 occasionally puts a slot in the wrong place. And only when the players were calm before it: a
 later kick-off (after an early goal) is a real kick-off too, but the play before it was live.
-Detected on our match: 113,750 against the documented 113,742; on the 14 training halves it
-changes nothing except before one retaken kick-off.
+On the training halves it changes nothing except before one retaken kick-off.
 
 What this does not catch: the dead frames where the ball IS visible mid-half (a ball placed for a
 free kick and tracked), and long live-play gaps.
@@ -56,9 +51,9 @@ KICKOFF_SEARCH_S = 300  # only the first five minutes of a half are searched
 OWN_HALF_TOL_M = 1.0    # kickers stand on the line; allow a metre
 KICKOFF_BALL_M = 9.15   # ...and the ball is inside the centre circle when the formation breaks
 KICKOFF_BALL_S = 2.0    # looked for within this many seconds either side
-# Before a half's first kick-off the players walk out and line up; nobody sprints. The p90 of the
-# per-frame mean player speed is 1.8 m/s before our second-half kick-off, 3.4 m/s before a Metrica
-# kick-off that followed 2.5 minutes of real play (an early goal), so the rule stays out of it.
+# Before a half's first kick-off the players walk out and line up; nobody sprints. A Metrica
+# kick-off that followed minutes of real play (an early goal) is well above this, so the rule
+# stays out of it.
 KICKOFF_CALM_MS = 2.5
 
 
@@ -130,6 +125,12 @@ def dead_mask(arrays, runs, min_dead_s=MIN_DEAD_S):
     for start, stop in stretches(missing, runs):
         if stop - start >= min_dead_s * FPS:
             dead[start:stop] = True
+    return dead | pre_kickoff_mask(arrays, runs)
+
+
+def pre_kickoff_mask(arrays, runs):
+    """True on [start, kick-off) of each run: nothing is live before a half's kick-off."""
+    mask = np.zeros(len(arrays["ball_xy"]), dtype=bool)
     for start, stop in runs:
-        dead[start:kickoff_frame(arrays, start, stop)] = True
-    return dead
+        mask[start:kickoff_frame(arrays, start, stop)] = True
+    return mask

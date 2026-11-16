@@ -21,6 +21,13 @@ Groups:
   control           how differently the ball and each team's nearest player move (a dribbled ball
                     moves with its player), and how many opponents press that player
   long context      the "who is closer" evidence over the last and next 5 s and 10 s
+  touches           possession changes at a touch, so find the touches on a lightly smoothed
+                    ball path: a sudden change of ball velocity with one team's player clearly
+                    nearest. Then who touched last and who touches next, seconds since / until
+                    each team's last / next touch, each team's touches over the last and next
+                    3 s; and the same since / until for "control" -- a slow ball within 1.5 m of
+                    one team's player with no opponent as close. The idea follows the touch
+                    features of hadisotudeh/more-than-a-hack-2027; this code is our own.
 
 NaN stays NaN: gradient boosting handles missing values natively, which matters because the ball
 is absent on a large share of frames.
@@ -37,6 +44,26 @@ FLIGHT_S = (0.4, 1.0)
 PRESS_M = 5.0
 VEL_LAG = 2  # frames, for velocities from positions
 GAP_CAP_S = 10.0
+# Touches and control (see the module docstring). The competition tracker smooths its ball path:
+# its velocity changes over 3 frames are a fifth of the external ones (touch_diag), so a detector
+# tuned to sharp kicks found 0.1 touches per minute there against ~20 on the external matches.
+# So the ball is smoothed over 1 s before detection, on every match -- far more than any tracker
+# does -- and the thresholds were set on the external matches only for that smoothed ball. The
+# competition match then shows 14.7 touches per minute against 15.9-22.5 on the external ones
+# (python -m solution.touch_check, run by a person). Leave one game out on the 10 external
+# matches, submitted decoding, two seeds (python -m solution.touch_exp heavy): spellF1
+# 0.6641 -> 0.7026, 8 of 10 matches, harsh +0.038 (10/10), lag +0.037 (9/10), 20 cm per-frame
+# ball jitter +0.054 (10/10). The sharp detector scored 0.748 there but cannot see our ball.
+TOUCH_FEATURES = True
+TOUCH_LAG = 8            # frames: ball velocity over the 8 frames before vs after
+TOUCH_MIN_DV = 3.0       # m/s: a velocity change at least this big is a touch candidate
+TOUCH_RADIUS_M = 3.5     # ...credited to a team whose nearest player is this close
+TOUCH_MARGIN_M = 0.5     # ...and at least this much closer than the nearest opponent
+CTRL_RADIUS_M = 1.5      # control: a player this close to the ball
+CTRL_MAX_SPEED = 12.0    # ...which moves slower than this (faster is a ball in flight)
+TOUCH_SMOOTH = 25        # frames: centred moving average of the ball before touch detection
+TOUCH_WINDOW_S = 3.0
+TOUCH_CAP_S = 10.0
 SPEED_SMOOTH = 5  # frames, for ball speed from positions
 
 
@@ -61,6 +88,73 @@ def _time_since_seen(seen):
     idx = np.arange(len(seen))
     last = np.maximum.accumulate(np.where(seen, idx, -10 ** 9))
     return np.minimum(idx - last, int(GAP_CAP_S * FPS)).astype(np.float32)
+
+
+def _frames_since(event, cap):
+    """Frames since the last True of `event` (0 on it), capped at `cap`; cap before the first."""
+    idx = np.arange(len(event))
+    last = np.maximum.accumulate(np.where(event, idx, -10 ** 9))
+    return np.minimum(idx - last, cap).astype(np.float64)
+
+
+def _touches(ball, d_us, d_them, runs):
+    """Touch and control features from the oriented ball and each team's nearest distance."""
+    n = len(ball)
+    lag, cap = TOUCH_LAG, int(TOUCH_CAP_S * FPS)
+    if TOUCH_SMOOTH > 1:
+        # Frame-to-frame jitter would read as velocity changes; a real kick survives this.
+        # Frames with any missing neighbour stay missing, so a gap never smears into the path.
+        k = TOUCH_SMOOTH
+        cs = np.concatenate([np.zeros((1, 2)), np.cumsum(np.nan_to_num(ball), axis=0)])
+        cn = np.concatenate([[0], np.cumsum(~np.isnan(ball[:, 0]))])
+        lo = np.clip(np.arange(n) - k // 2, 0, n)
+        hi = np.clip(np.arange(n) + k - k // 2, 0, n)
+        full = (cn[hi] - cn[lo]) == k
+        ball = np.where(full[:, None], (cs[hi] - cs[lo]) / k, np.nan)
+    before = np.full_like(ball, np.nan)
+    after = np.full_like(ball, np.nan)
+    before[lag:] = (ball[lag:] - ball[:-lag]) * FPS / lag
+    after[:-lag] = (ball[lag:] - ball[:-lag]) * FPS / lag
+    dv = np.linalg.norm(after - before, axis=1)              # NaN unless all three are seen
+    valid = np.where(np.isnan(dv), -np.inf, dv)
+    local = valid.copy()
+    for shift in range(1, lag + 1):                          # a peak within +/- lag frames
+        local[shift:] = np.maximum(local[shift:], valid[:-shift])
+        local[:-shift] = np.maximum(local[:-shift], valid[shift:])
+    with np.errstate(invalid="ignore"):
+        peak = (valid >= TOUCH_MIN_DV) & (valid >= local)
+        us_touch = peak & (d_us <= TOUCH_RADIUS_M) & (d_us + TOUCH_MARGIN_M <= d_them)
+        them_touch = peak & (d_them <= TOUCH_RADIUS_M) & (d_them + TOUCH_MARGIN_M <= d_us)
+        step = np.concatenate([[np.nan], np.linalg.norm(np.diff(ball, axis=0), axis=1) * FPS])
+        slow = step < CTRL_MAX_SPEED
+        us_ctrl = slow & (d_us < CTRL_RADIUS_M) & (d_them > d_us + TOUCH_MARGIN_M)
+        them_ctrl = slow & (d_them < CTRL_RADIUS_M) & (d_us > d_them + TOUCH_MARGIN_M)
+
+    out = {k: np.full(n, np.nan) for k in (
+        "touch_since_us", "touch_since_them", "touch_until_us", "touch_until_them",
+        "touch_last", "touch_next", "touch_n_past_us", "touch_n_past_them", "touch_n_next_us",
+        "touch_n_next_them", "ctrl_since_us", "ctrl_since_them", "ctrl_until_us",
+        "ctrl_until_them")}
+    window = int(TOUCH_WINDOW_S * FPS)
+    for start, stop in runs:                                  # nothing carries across halves
+        seg = slice(start, stop)
+        idx = np.arange(stop - start)
+        for tag, touch, ctrl in (("us", us_touch, us_ctrl), ("them", them_touch, them_ctrl)):
+            t, c = touch[seg], ctrl[seg]
+            out["touch_since_" + tag][seg] = _frames_since(t, cap) / FPS
+            out["touch_until_" + tag][seg] = _frames_since(t[::-1], cap)[::-1] / FPS
+            out["ctrl_since_" + tag][seg] = _frames_since(c, cap) / FPS
+            out["ctrl_until_" + tag][seg] = _frames_since(c[::-1], cap)[::-1] / FPS
+            cs = np.concatenate(([0], np.cumsum(t)))
+            out["touch_n_past_" + tag][seg] = cs[idx + 1] - cs[np.maximum(0, idx + 1 - window)]
+            out["touch_n_next_" + tag][seg] = cs[np.minimum(len(t), idx + window)] - cs[idx]
+        sign = np.where(us_touch[seg], 1.0, np.where(them_touch[seg], -1.0, 0.0))
+        last = np.maximum.accumulate(np.where(sign != 0, idx, -1))
+        out["touch_last"][seg] = np.where(last >= 0, sign[np.maximum(last, 0)], 0.0)
+        rev = sign[::-1]
+        nxt = np.maximum.accumulate(np.where(rev != 0, idx, -1))
+        out["touch_next"][seg] = np.where(nxt >= 0, rev[np.maximum(nxt, 0)], 0.0)[::-1]
+    return out
 
 
 def attack_signs(arrays, runs):
@@ -175,6 +269,8 @@ def compute(arrays, runs, swap=False):
         for direction, tag in ((-1, "past"), (1, "next")):
             cols["near_us_{}{:g}".format(tag, w)] = _rolling_mean(near_us, frames, direction)
 
+    if TOUCH_FEATURES:
+        cols.update(_touches(ball, cols["d1_us"], cols["d1_them"], runs))
 
     names = sorted(cols)
     matrix = np.full((n, len(names)), np.nan, dtype=np.float32)

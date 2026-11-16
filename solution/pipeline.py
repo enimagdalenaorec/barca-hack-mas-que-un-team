@@ -20,6 +20,10 @@ stoppage the visible-ball frames outvote the dead ones: every stoppage shrinks b
 both ends and any stoppage shorter than twice the window disappears. Deciding dead first, then
 smoothing inside each live stretch, keeps stoppages exactly where the tracking puts them.
 
+With --dead model (the default) step 1 is not taken alone: a learned P(dead) and P(home) are
+decoded together by one home / away / dead Viterbi per half (solution/dead_model.py,
+decode.viterbi3); frames before the detected kick-off are forced dead.
+
 Frames outside the graded halves are written X.
 """
 
@@ -39,6 +43,10 @@ from solution.diagnostics import graded_runs  # noqa: E402
 RESULTS_DIR = os.path.join(ROOT, "evaluation", "results")
 WINDOW = 50  # +/- frames; the published floor's value, kept so the comparison changes one thing
 HOME, AWAY, NOBODY = 0, 1, -1
+# Dead-ball method of the model path: "model" (learned P(dead) + one H/A/D Viterbi per half) or
+# "rule" (ball missing >= 2 s). "model" beats the rule on held-out spellF1 under every ball-gap
+# regime tried on the 10 external matches (python -m solution.logo dead; docs/logo_external.md, b).
+DEAD = "model"
 
 
 def nearest_team(arrays):
@@ -84,12 +92,22 @@ def build(arrays, runs, window=WINDOW):
     return labels
 
 
-def build_model(arrays, runs):
-    """Label array from the trained model + Viterbi. Imported lazily: needs scikit-learn."""
+def build_model(arrays, runs, dead=DEAD):
+    """Label array from the trained model + Viterbi. Imported lazily: needs scikit-learn.
+
+    dead="rule": dead_ball.dead_mask, then a two-state Viterbi on each live stretch.
+    dead="model": the learned P(dead) (solution/dead_model.py) and one H/A/D Viterbi per half.
+    """
     from solution import decode, model
     import possession_metrics as pm
     p = model.p_home(model.load_or_train(), arrays, runs)
-    codes = model.labels_from(p, arrays, runs, decode.SWITCH_COST)
+    if dead == "model":
+        from solution import dead_model
+        p_dead = dead_model.p_dead(dead_model.load_or_train(), arrays, runs)
+        codes = model.labels_from3(p, p_dead, arrays, runs,
+                                   (decode.SWITCH_COST, decode.STOP_COST, decode.RESTART_COST))
+    else:
+        codes = model.labels_from(p, arrays, runs, decode.SWITCH_COST)
     return np.array(pm.LABELS, dtype="<U1")[codes]
 
 
@@ -104,12 +122,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--method", choices=("model", "rule"), default="model")
     parser.add_argument("--window", type=int, default=WINDOW, help="rule method only")
+    parser.add_argument("--dead", choices=("rule", "model"), default=DEAD,
+                        help="model method only: dead-ball rule or learned P(dead)")
     parser.add_argument("--name", default=None, help="file name on the board, without .csv")
     args = parser.parse_args()
 
     arrays, runs = tracking.load(GAME), graded_runs(GAME)
     if args.method == "model":
-        labels = build_model(arrays, runs)
+        labels = build_model(arrays, runs, args.dead)
         name = args.name or "model_viterbi"
     else:
         labels = build(arrays, runs, args.window)

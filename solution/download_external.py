@@ -3,13 +3,13 @@
     python -m solution.download_external            # Metrica + IDSSE, whatever is missing
     python -m solution.download_external --list     # what is converted, and its size
 
-One match at a time: download -> convert to data/cache/ext_*.npz -> delete the raw files. Peak
+Raw files already on disk are used in place and never deleted: data/external/metrica/
+(Sample_Game_1..3, original names) and data/external/idsse/ (DFL_02_01_matchinformation_* and
+DFL_04_03_positions_raw_observed_*, original names). Anything missing is downloaded from the
+pinned revisions below, one match at a time: download -> convert -> delete the raw files. Peak
 extra disk is one raw match (~400 MB for IDSSE); what stays is ~30 MB per match.
-About 1.7 GB is downloaded in all: Metrica ~250 MB, IDSSE ~1.5 GB.
 
-MATCHES is deliberately a subset (decided 2026-11-07 to keep the download near 1.9 GB): 4 of the
-7 IDSSE matches, two per division. The other three are listed commented out; the learning
-curve without SkillCorner is flat from 4 to 6 training matches, so they were not needed.
+All 7 IDSSE matches are listed; which of them the model trains on is model.IDSSE_TRAIN.
 """
 
 import argparse
@@ -22,7 +22,9 @@ sys.path.insert(0, ROOT)
 from solution import external_games as ext  # noqa: E402
 
 # Params
-METRICA_URL = "https://raw.githubusercontent.com/metrica-sports/sample-data/master/data/"
+# Pinned so the training set cannot change under the submission.
+METRICA_URL = ("https://raw.githubusercontent.com/metrica-sports/sample-data/"
+               "e706dd506b360d69d9d123d5b8026e7294b13996/data/")
 METRICA_FILES = {
     1: ["Sample_Game_1_RawEventsData.csv", "Sample_Game_1_RawTrackingData_Home_Team.csv",
         "Sample_Game_1_RawTrackingData_Away_Team.csv"],
@@ -30,15 +32,17 @@ METRICA_FILES = {
         "Sample_Game_2_RawTrackingData_Away_Team.csv"],
     3: ["Sample_Game_3_events.json", "Sample_Game_3_metadata.xml", "Sample_Game_3_tracking.txt"],
 }
-IDSSE_URL = "https://huggingface.co/datasets/pysport/idsse-data/resolve/main/"
+# Pinned so the training set cannot change under the submission.
+IDSSE_URL = ("https://huggingface.co/datasets/pysport/idsse-data/resolve/"
+             "a715a38dfbaf5f58e431727c2b78d174101a703c/")
 SC_RAW = "https://raw.githubusercontent.com/SkillCorner/opendata/master/data/matches/"
 SC_LFS = "https://media.githubusercontent.com/media/SkillCorner/opendata/master/data/matches/"
 MATCHES = {
     "idsse": [
         ("DFL-COM-000001", "J03WMX"), ("DFL-COM-000001", "J03WN1"),   # Bundesliga
         ("DFL-COM-000002", "J03WOH"), ("DFL-COM-000002", "J03WOY"),   # 2. Bundesliga
-        # ("DFL-COM-000002", "J03WPY"), ("DFL-COM-000002", "J03WQQ"),
-        # ("DFL-COM-000002", "J03WR9"),
+        ("DFL-COM-000002", "J03WPY"), ("DFL-COM-000002", "J03WQQ"),
+        ("DFL-COM-000002", "J03WR9"),
     ],
     # SkillCorner was tried and dropped: training without it is better on every held-out match
     # (solution/model.py, SOURCES). Kept fetchable with --skillcorner to rerun that experiment.
@@ -50,6 +54,7 @@ MATCHES = {
 
 def fetch(url, path):
     """curl, because it follows the LFS / CDN redirects and shows a clear failure."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     subprocess.run(["curl", "-sfL", "--retry", "3", url, "-o", path], check=True)
     return path
 
@@ -60,6 +65,12 @@ def get_metrica(n):
     from solution import sample_games
     if os.path.isfile(sample_games.cache_path(n)):
         return
+    local = os.path.join(sample_games.LOCAL_DIR, "Sample_Game_{}".format(n))
+    if all(os.path.isfile(os.path.join(local, f)) for f in METRICA_FILES[n]):
+        sample_games.SAMPLE_DIR = sample_games.LOCAL_DIR
+        sample_games.load(n)  # converts and caches; the local raw files are kept
+        return
+    sample_games.SAMPLE_DIR = os.path.join(sample_games.DATA_DIR, "sample")
     folder = os.path.join(sample_games.SAMPLE_DIR, "Sample_Game_{}".format(n))
     os.makedirs(folder, exist_ok=True)
     paths = [fetch(METRICA_URL + "Sample_Game_{}/{}".format(n, f), os.path.join(folder, f))
@@ -74,6 +85,11 @@ def get_metrica(n):
 def get_idsse(competition, match):
     out = ext.cache_path("idsse", match)
     if os.path.isfile(out):
+        return out
+    local = ext.local_idsse(competition, match)
+    if local:
+        arrays = ext.convert_idsse(*local)  # the local raw files are kept
+        ext.np.savez_compressed(out, **arrays)
         return out
     stem = "{}_DFL-MAT-{}.xml".format(competition, match)
     info = fetch(IDSSE_URL + "DFL_02_01_matchinformation_" + stem,
@@ -122,7 +138,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if not args.list:
-        os.makedirs(ext.RAW_DIR, exist_ok=True)
         os.makedirs(ext.CACHE_DIR, exist_ok=True)
         for n in METRICA_FILES:
             print("metrica {} ...".format(n), flush=True)

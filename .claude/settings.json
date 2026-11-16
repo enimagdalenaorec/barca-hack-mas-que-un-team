@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./data/tactical/**)",
+      "Read(./data/broadcast/**)",
+      "Read(./data/cache/**)",
+      "Read(./evaluation/gt/**)",
+      "Read(./evaluation/results/**)",
+      "Read(./evaluation/reports/**)",
+      "Read(./evaluation/scoreboard.csv)",
+      "Read(**/*.mp4)",
+      "Read(./starter/*.ipynb)",
+      "mcp__terminal__read_terminal"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "grep -qiE 'data[/\\\\]+(tactical|broadcast|cache)|BAR-ATH|evaluation[/\\\\]+(gt|results|reports)|scoreboard|run_evaluation|validate_submission|solution[./\\\\]+(pipeline|tracking|diagnostics)|starter[/\\\\]+(baseline|load_)|MTAH_DATA_DIR|(^|[ ;&|])(find|tree|du|rg) |grep +-[a-zA-Z]*r|ls +-[a-zA-Z]*R' && { echo 'Blocked: competition match data and anything computed from it must not be shown to Claude (T&C ban on cloud LLMs). Run it yourself and keep the output to yourself.' >&2; exit 2; }; exit 0",
+            "statusMessage": "Checking for match-data access"
+          }
+        ]
+      }
+    ]
+  }
+}
