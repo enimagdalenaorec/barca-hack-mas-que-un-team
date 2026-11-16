@@ -3,8 +3,16 @@
 Raw material for the technical document. Every number below is a **held-out** score: for each of
 the 7 matches with full H/A/D labels (3 Metrica, 4 IDSSE), the model was trained on the other
 matches and scored on that one with the official metric library (`evaluation/possession_metrics.py`),
-through the whole pipeline — dead-ball rule, model, Viterbi smoothing. Nothing here uses the
-competition match or its public 5 minutes.
+through the whole pipeline — dead-ball rule, model, Viterbi smoothing.
+
+**This file is the history of the work, kept as it happened.** Three entries used the competition
+match: 12 compared label granularity with the public window, 13a measured aggregate ball-gap
+statistics of the match's tracking, and 16 used one public-window run to choose between label
+definitions; the switch cost of 14 in experiment 14 was argued from 12. EVALUATION.md says the
+public window must never choose between versions, so in the final round (Phase 6 at the end)
+every choice was re-made on 10 external matches only, and the code of 12, 13 and 13a was removed
+(`gap_stats`, `experiments labels / dead / calibration` no longer exist). The submission follows
+Phase 6, not the decisions recorded in between.
 
 "Wins" = on how many of the 7 matches a variant beat the reference. With 7 matches, differences
 under ~0.01–0.02 spellF1 are noise unless they win on most matches.
@@ -334,3 +342,33 @@ labels switch more often than the public ground truth, the model's predictions o
 already have about the right number of possessions (16 vs 17), and relabelling made them too long.
 `model.CONTROL_S` stays None; the candidate file was deleted and nothing else is scored on the
 public window.
+
+# Phase 6 (karlo): every choice re-made on 10 external matches
+
+Harnesses `solution/logo.py` (round 1) and `solution/logo2.py` (round 2); full tables and the
+adoption rules, written before each round, in [logo_external.md](logo_external.md). Leave one game
+out over 3 Metrica + 7 IDSSE matches; nothing reads the competition match or its public window.
+
+- **Round 1** (one held-out seed; reference: the Phase 5 configuration, 0.645). Learned dead ball
+  (experiment 13's model, STOP 20 / RESTART 8) adopted: +0.010 (7/10) under the default regime,
+  +0.021 / +0.007 / +0.044 under the `harsh`, `real` and `lag` regimes. Switch cost 14 confirmed
+  by the external grid alone (nested choice 14 in 10 of 10 folds), replacing experiment 14's
+  argument. Rejected: 7 IDSSE matches for the team model, controlled-possession labels, minimum
+  possession length, seed and subsample ensembles, training with position noise or harsher
+  regimes, kick-off variants.
+- **Round 2** (two held-out seeds; reference: round 1's result, 0.6526). Adopted together:
+  switch cost x0.4 within 10 frames of a "flip" (nearest team changes, new nearest player within
+  2 m) and 20 elsewhere; dead model trained on all 7 IDSSE matches; temperature 2 on P(dead).
+  Nested estimate +0.0097, 10/10 matches, `harsh` +0.011, `lag` +0.024, macroF1 0.915 -> 0.922.
+  Rejected: joint cost grid, other evidence-dependent costs, temperature on P(home), second-stage
+  model, posterior decoding, other dead-model GBM settings.
+
+Same harness, all versions (spellF1 over 10 matches x 2 seeds):
+
+| version | default | Metrica | IDSSE | macroF1 | harsh | lag |
+|---|---|---|---|---|---|---|
+| published baseline rule (+/-50 vote) | 0.347 | | | 0.799 | 0.328 | 0.343 |
+| Phase 4 (2 s rule, switch cost 10) | 0.644 | 0.745 | 0.600 | 0.901 | 0.596 | 0.580 |
+| Phase 5 (2 s rule, switch cost 14) | 0.644 | 0.749 | 0.599 | 0.901 | 0.592 | 0.581 |
+| round 1 (learned dead ball) | 0.653 | 0.740 | 0.615 | 0.915 | 0.616 | 0.624 |
+| **round 2, submitted** (nested estimate 0.662) | **0.664** | 0.751 | 0.627 | 0.922 | 0.628 | 0.650 |
