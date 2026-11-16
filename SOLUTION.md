@@ -10,7 +10,8 @@ every experiment behind it is in [docs/experiments.md](docs/experiments.md).
    team, never per player.
 2. **Models**: gradient-boosted trees (scikit-learn) give P(home has the ball)
    (`solution/model.py`) and P(ball out of play) (`solution/dead_model.py`) per frame. Trained on
-   7 public matches of **other** games — 3 Metrica sample games and 4 IDSSE Bundesliga matches —
+   public matches of **other** games — 3 Metrica sample games and 4 (team model) or 7 (dead model)
+   IDSSE Bundesliga matches —
    made to look like automatic tracking first (`solution/augment.py`).
 3. **Decoding** (`solution/decode.py`, `viterbi3`): one home / away / dead Viterbi per half, with
    costs for switching team, stopping and restarting, turns the per-frame probabilities into whole
@@ -18,12 +19,15 @@ every experiment behind it is in [docs/experiments.md](docs/experiments.md).
    set in their own halves, ball in the centre circle; `solution/dead_ball.py`) are forced dead.
 
 Every choice is made by leave-one-game-out on 10 external matches (3 Metrica + 7 IDSSE), never on
-the competition match ([docs/logo_external.md](docs/logo_external.md)): held-out spellF1 **0.655**,
-against 0.645 for the same model with the "ball missing >= 2 s = dead" rule, and the learned dead
-ball is ahead of that rule under every ball-gap regime tried. Switch cost 14 is the best of 6-60
-and the nested choice in 10 of 10 folds. Tried and kept out: all 7 IDSSE matches for training,
-controlled-possession training labels, minimum possession length, seed ensembles, noise
-augmentation, kick-off variants. `--dead rule` switches back to the 2 s rule.
+the competition match ([docs/logo_external.md](docs/logo_external.md)). The learned dead ball beats
+the "ball missing >= 2 s = dead" rule under every ball-gap regime tried. Round 2 added, together:
+a lower switch cost (x0.4) within 10 frames of a "flip" (the team nearest the ball changes and the
+new nearest player is within 2 m), switch cost 20 elsewhere, P(dead) trained on all 7 IDSSE
+matches (the team model stays on 4) and temperature 2 on P(dead). Nested held-out spellF1 rises
+by 0.0097, on 10 of 10 matches, and also under the harsher ball-gap regimes. Tried and kept out:
+all 7 IDSSE matches for the team model, controlled-possession training labels, minimum possession
+length, seed ensembles, noise augmentation, kick-off variants, a second-stage model, posterior
+decoding. `--dead rule` switches back to the 2 s rule.
 
 ## Reproduce
 
@@ -62,6 +66,7 @@ the same model) and writes `evaluation/results/model_viterbi.csv`:
 
 ```bash
 .venv/bin/python -m solution.logo <name>             # leave-one-game-out on the 10 external matches (docs/logo_external.md)
+.venv/bin/python -m solution.logo2 <name>            # round 2 of it: flip cost, temperature, dead model on 7 IDSSE
 .venv/bin/python -m solution.model --evaluate        # leave-one-match-out scores on the training matches
 .venv/bin/python -m solution.experiments <name>      # earlier experiments (docs/experiments.md)
 .venv/bin/python -m solution.diagnostics <csv> ...   # describe submissions without any ground truth
@@ -81,8 +86,8 @@ submission is byte-identical whether the model trains on 1 CPU thread or the def
   tracking and events. Labels derived from Metrica's human-produced event data.
 - **IDSSE** — Bassek, Rein, Weber & Memmert, *An integrated dataset of spatiotemporal and event data
   in elite soccer*, Scientific Data 12, 195 (2025), CC-BY 4.0 —
-  https://huggingface.co/datasets/pysport/idsse-data — all 7 matches for validation, 4 of them
-  for training, official DFL tracking with per-frame ball status and possession.
+  https://huggingface.co/datasets/pysport/idsse-data — all 7 matches for validation and the dead-ball
+  model, 4 of them for the team model, official DFL tracking with per-frame ball status and possession.
 - Tried and dropped: **SkillCorner open data** (MIT) — training without it was better on every
   held-out match.
 

@@ -162,14 +162,54 @@ def labels_from(p, arrays, runs, switch_cost):
     return codes
 
 
-def labels_from3(p_home, p_dead, arrays, runs, costs):
+def nearest_distances(arrays, runs):
+    """(home, away): distance from the ball to each team's nearest player per frame; NaN where
+    the ball or the whole team is missing, and outside the runs."""
+    ball = arrays["ball_xy"].astype(np.float64)
+    players = arrays["players_xy"].astype(np.float64)
+    dist = np.sqrt(np.square(players - ball[:, None, :]).sum(-1))
+    inside = np.zeros(len(ball), dtype=bool)
+    for start, stop in runs:
+        inside[start:stop] = True
+    out = []
+    for side in (0, 1):
+        d = np.where(np.isnan(dist[:, arrays["slot_team"] == side]), np.inf,
+                     dist[:, arrays["slot_team"] == side]).min(axis=1)
+        out.append(np.where(np.isinf(d) | ~inside, np.nan, d))
+    return out[0], out[1]
+
+
+def labels_from3(p_home, p_dead, arrays, runs, costs, flip="default", dead_temperature="default"):
     """Codes H/A/D/X for a whole match: one three-state Viterbi per run (decode.viterbi3), frames
-    before the detected kick-off forced dead. costs = (switch, stop, restart)."""
+    before the detected kick-off forced dead. costs = (switch, stop, restart).
+
+    flip: None, or (factor, radius_m, window) -- the switch cost is multiplied by factor near a
+    flip of the team nearest the ball (decode.flip_frames). dead_temperature: None, or T for
+    decode.tempered on p_dead. "default" reads decode.FLIP_FACTOR / FLIP_RADIUS_M / FLIP_WINDOW
+    and decode.DEAD_TEMPERATURE, which are off unless set there."""
+    if flip == "default":
+        flip = None if decode.FLIP_FACTOR is None else (
+            decode.FLIP_FACTOR, decode.FLIP_RADIUS_M, decode.FLIP_WINDOW)
+    if dead_temperature == "default":
+        dead_temperature = decode.DEAD_TEMPERATURE
     forced = dead_ball.pre_kickoff_mask(arrays, runs)
     codes = np.full(len(p_home), pm.X, dtype=np.int8)
     letters = np.array([pm.H, pm.A, pm.D], dtype=np.int8)
+    if flip is None and dead_temperature is None:
+        for start, stop in runs:
+            path = decode.viterbi3(p_dead[start:stop], p_home[start:stop], forced[start:stop],
+                                   *costs)
+            codes[start:stop] = letters[path]
+        return codes
+    if dead_temperature is not None:
+        p_dead = decode.tempered(p_dead, dead_temperature)
+    switch = np.full(len(p_home), float(costs[0]))
+    if flip is not None:
+        factor, radius_m, window = flip
+        switch[decode.flip_frames(*nearest_distances(arrays, runs), radius_m, window)] *= factor
     for start, stop in runs:
-        path = decode.viterbi3(p_dead[start:stop], p_home[start:stop], forced[start:stop], *costs)
+        path = decode.viterbi3(p_dead[start:stop], p_home[start:stop], forced[start:stop],
+                               switch[start:stop], costs[1], costs[2])
         codes[start:stop] = letters[path]
     return codes
 

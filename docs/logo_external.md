@@ -378,3 +378,176 @@ uvoda.
 Svi eksperimenti zajedno: oko 2 h 10 min na 10 jezgri (referenca + a: 6 min; e: 1 min; b: 25
 min; c: 15 min; d: 9 min; g: 3 min; f: oko 45 min; kombinacija, b2 i b3: oko 25 min). Ponovno
 pokretanje s punim kešom predikcija traje nekoliko minuta po eksperimentu.
+
+# Krug 2 (solution/logo2.py)
+
+Sve brojke i dalje dolaze isključivo s 10 vanjskih utakmica (3 Metrica + 7 IDSSE).
+
+## Pravilo usvajanja (zapisano PRIJE mjerenja u ovom krugu)
+
+Referenca je nova zadana konfiguracija predaje: team model (3 Metrica + 4 IDSSE bez held-out
+utakmice) + naučeni P(dead) (isti trening skup) + `decode.viterbi3` sa SWITCH 14 / STOP 20 /
+RESTART 8, zadana augmentacija treninga.
+
+Mjerenje. U prvom krugu sam seed augmentacije held-out utakmice pomiče prosjek za do oko 0.011.
+Zato se u ovom krugu svaka varijanta I referenca boduju na held-out utakmici degradiranoj s dva
+seeda (`seed_of(ime) + 1` i `seed_of(ime) + 2`); prosjek spellF1 uzima se preko 20 parova
+(utakmica × seed), a pobjede se broje po utakmici (prosjek spellF1 te utakmice preko 2 seeda).
+Tri held-out regima iz `solution/logo.py`: `default`, `harsh` i `lag` (lopta vidljiva do 3 s nakon
+prekida i prije nastavka; pretpostavka, stres-test).
+
+- **usvoji**: na `default` prosjek spellF1 raste za ≥ 0.008 prema referenci I varijanta
+  pobjeđuje na ≥ 7 od 10 utakmica I na `harsh` i na `lag` prosjek ne pada za više od 0.005;
+- **možda**: prosjek na `default` raste, ali barem jedan uvjet nije ispunjen;
+- **odbaci**: prosjek na `default` ne raste.
+
+Ako se hiperparametar bira na held-out rezultatima, uz najbolju vrijednost prijavljuje se
+**ugniježđena procjena** (za svaku utakmicu izbor na preostalih 9 po prosjeku `default`
+spellF1, primjena na tu jednu, na oba seeda), i odluka se donosi na njoj, ne na optimističnom
+maksimumu. Ista ugniježđena vrijednost po utakmici primjenjuje se i na `harsh` i `lag`.
+Preferiraju se promjene koje ni u jednom regimu ne štete.
+
+## Kako se pokreće (krug 2)
+
+```
+.venv/bin/python -m solution.logo2 prep                 # modeli po foldu, keš vjerojatnosti (jednom)
+.venv/bin/python -m solution.logo2 ref | costs | evidence | flip | final | temp | dead7 | stack | deadgbm | smalldead | mpm
+```
+
+`prep` za svaki fold trenira jedan team model i dva dead modela (4 i 7 IDSSE) i sprema P(home),
+P(dead), pre-kickoff masku i nekoliko stupaca dokaza za held-out utakmicu pod svakim regimom i
+oba seeda u `data/external/cache/logo2/`. Svi eksperimenti dekodiranja rade na tom kešu. Bodovanje
+je `pm.spell_scores` / `pm.evaluate` iz službene biblioteke. `final` čita mrežu koju spremi `flip`.
+
+## Referenca (2 seeda)
+
+| regim | spellF1 (20) | Metrica | IDSSE | macroF1 | posjeda pred./istina | seed +1 / seed +2 |
+|---|---|---|---|---|---|---|
+| default | 0.6526 | 0.740 | 0.615 | 0.915 | 308 / 412 | 0.6545 / 0.6506 |
+| harsh | 0.6157 | 0.699 | 0.580 | 0.878 | 310 / 412 | 0.6164 / 0.6149 |
+| lag | 0.6239 | 0.735 | 0.576 | 0.901 | 322 / 412 | 0.6234 / 0.6243 |
+
+## Rezultati po ideji
+
+Δ je prema referenci u istom regimu; „ugniježđeno" = izbor na 9, primjena na 10. utakmicu.
+
+| # | ideja | najbolje na svih 10 (optimistično) | ugniježđeno, default | pobjede | Δ harsh / lag | odluka |
+|---|---|---|---|---|---|---|
+| 1 | SWITCH × STOP × RESTART, 120 postavki | (12, 30, 20): +0.0010 | +0.0005 | 7/10 | +0.0027 / −0.0003 | možda (šum); cijene ostaju |
+| 2 | cijena prijelaza ovisna o dokazu, 108 postavki: skok P(home) | +0.0022 | | | | možda (šum) |
+| 2 | isto: viša/niža cijena dok lopte nema | +0.0012 | | | | možda (šum) |
+| 2 | isto: niža cijena oko promjene najbliže momčadi („flip") | +0.0070 | +0.0053 | 9/10 | +0.0045 / +0.0048 | možda → šira mreža (2b) |
+| 3 | temperatura T_home × T_dead, 49 postavki | (0.7, 2.0): +0.0019 | +0.0005 | 5/10 | +0.0034 / −0.0000 | možda (šum) |
+| 3 | samo T_dead 2 | +0.0009 | | 8/10 | +0.0020 / +0.0017 | možda |
+| 4 | P(dead) treniran na 3 Metrica + 7 IDSSE | +0.0022 (macroF1 +0.006) | (nema izbora) | 9/10 | +0.0054 / +0.0153 | možda; nigdje ne šteti |
+| 5 | drugi stupanj (team + dead), cijene birane ugniježđeno | (6, 20, 8): +0.0043 | +0.0043 | 6/10 | +0.0106 / +0.0204 | možda; ne isplati se |
+| 5 | drugi stupanj, zadane cijene | −0.0139 | | 0/10 | −0.0089 / +0.0043 | odbaci |
+| 7 | posteriorno dekodiranje (max. marginalna), 16 postavki | (14, 20, 8): +0.0003 | +0.0003 | 5/10 | −0.0000 / −0.0000 | odbaci (isto kao Viterbi) |
+
+Napomene:
+
+- **1.** Mreža je ravna (medijan 0.6514, maksimum 0.6535). SWITCH 14 uz naučeni P(dead) nije
+  pogrešno biran; STOP i RESTART ne znače gotovo ništa.
+- **2.** „Flip" je frame na kojem se momčad najbliža lopti promijeni (obje udaljenosti poznate na
+  oba framea) i novi najbliži igrač je unutar R metara. U prozoru ±W frameova oko flipa cijena
+  prijelaza je SWITCH × r, drugdje SWITCH. Kratki posjed koji počinje i završava na takvim
+  frameovima više ne mora nadjačati dvije pune cijene; izvan njih cijena smije biti viša (20), pa
+  nema treperenja.
+- **5.** Drugi stupanj: GBM (200 stabala) nad P(home), P(dead) i njihovim kliznim prosjecima
+  ±0.4/1/3/10 s, treniran na out-of-fold vjerojatnostima prvog stupnja (28 dodatnih parova
+  modela). Zaglađuje vjerojatnosti pa sa zadanim cijenama gubi kratke posjede; s nižom cijenom
+  prijelaza vraća se malo iznad reference. Dobit ne opravdava dodatni stupanj treninga.
+
+## 2b. Flip na široj mreži, zajedno s P(dead) na 7 IDSSE i T_dead
+
+Mreža: SWITCH {17, 20, 25, 30} × r {0.1, 0.2, 0.3, 0.4} × R {1, 1.5, 2 m} × W {6, 10, 15} × P(dead)
+{4, 7 IDSSE} × T_dead {1, 2} = 576 postavki; ugniježđeni izbor ide preko cijele (pod)mreže.
+
+| varijanta | spellF1 default (20) | Metrica | IDSSE | posjeda pred./istina | Δ | pobjede | Δ harsh | Δ lag | odluka |
+|---|---|---|---|---|---|---|---|---|---|
+| referenca | 0.6526 | 0.740 | 0.615 | 308 / 412 | referenca | | | | |
+| samo P(dead) na 7 IDSSE | 0.6548 | 0.743 | 0.617 | 308 / 412 | +0.0022 | 9/10 | +0.0054 | +0.0153 | možda |
+| samo T_dead 2 | 0.6535 | 0.741 | 0.616 | 307 / 412 | +0.0009 | 8/10 | +0.0020 | +0.0017 | možda |
+| flip (20, 0.4, 2.0, 10) (fiksno) | 0.6605 | 0.747 | 0.624 | 310 / 412 | +0.0079 | 10/10 | +0.0046 | +0.0080 | možda |
+| flip, ugniježđeni izbor | 0.6586 | 0.745 | 0.621 | 314 / 412 | +0.0060 | 10/10 | +0.0035 | +0.0065 | možda |
+| flip + dead7 (fiksno) | 0.6629 | 0.749 | 0.626 | 309 / 412 | +0.0103 | 10/10 | +0.0096 | +0.0239 | usvoji |
+| flip + dead7, ugniježđeni izbor | 0.6612 | 0.749 | 0.624 | 313 / 412 | +0.0086 | 10/10 | +0.0084 | +0.0223 | usvoji |
+| **flip + dead7 + T_dead 2 (fiksno, prijedlog)** | **0.6641** | 0.751 | 0.627 | 307 / 412 | **+0.0116** | 10/10 | +0.0118 | +0.0261 | usvoji |
+| flip (20, 0.3, 2.0, 10) + dead7 + T_dead 2 (fiksno, najbolji na svih 10) | 0.6643 | 0.751 | 0.627 | 314 / 412 | +0.0117 | 10/10 | +0.0118 | +0.0254 | usvoji |
+| **flip + dead7 + T_dead 2, ugniježđeni izbor** | **0.6623** | 0.749 | 0.625 | 311 / 412 | **+0.0097** | 10/10 | +0.0107 | +0.0243 | **usvoji** |
+
+Ugniježđeni izbori (puna mreža): (20, 0.3, 2.0, 10) u 5 foldova, (20, 0.3, 2.0, 6) u 3,
+(20, 0.4, 2.0, 10) u 2; uvijek dead7 i T_dead 2. R = 2 m je rub mreže.
+
+Po utakmici (prosjek 2 seeda), referenca → prijedlog: metrica1 0.746 → 0.756, metrica2 0.772 →
+0.786, metrica3 0.703 → 0.711, J03WMX 0.571 → 0.582, J03WN1 0.570 → 0.579, J03WOH 0.648 → 0.665,
+J03WOY 0.585 → 0.603, J03WPY 0.624 → 0.633, J03WQQ 0.666 → 0.668, J03WR9 0.640 → 0.658.
+
+### Provjera izvan pravila: šum pozicije
+
+Flip ovisi o točnim pozicijama lopte i igrača, a regimi `harsh` i `lag` mijenjaju samo rupe u
+lopti. Zato je dodana provjera pod glatkim šumom pozicije iz prvog kruga (`mid`: igrači σ 0.25 m,
+lopta σ 0.5 m; `high`: 0.5 m / 1.0 m i jedan praćeni igrač manje; pretpostavka, ne mjerenje),
+s istim modelima, 2 seeda. Referenca: 0.6108 (`mid`), 0.5634 (`high`).
+
+| varijanta | macroF1 default (Δ) | Δ šum mid (pobjede) | Δ šum high (pobjede) |
+|---|---|---|---|
+| samo P(dead) na 7 IDSSE | 0.9211 (+0.0059) | +0.0002 (6/10) | −0.0007 (5/10) |
+| samo T_dead 2 | 0.9152 (+0.0000) | +0.0007 (7/10) | +0.0005 (8/10) |
+| flip (20, 0.4, 2.0, 10) | 0.9160 (+0.0008) | +0.0012 (7/10) | −0.0009 (3/10) |
+| flip + dead7 + T_dead 2 (prijedlog) | 0.9222 (+0.0070) | +0.0023 (6/10) | −0.0009 (4/10) |
+| flip (20, 0.3, 2.0, 10) + dead7 + T_dead 2 | 0.9223 (+0.0071) | +0.0011 (5/10) | −0.0032 (4/10) |
+| flip + dead7 + T_dead 2, ugniježđeni izbor | 0.9220 (+0.0068) | +0.0013 (6/10) | −0.0026 (4/10) |
+
+**Dobit od flipa nestaje kad su pozicije šumne**: pod `mid` je unutar šuma mjerenja, pod `high`
+blago negativna. Zato se predlaže r = 0.4 umjesto 0.3: na `default` je isti (−0.0001), a pod
+šumom gubi manje (−0.0009 naspram −0.0032). Zaglađivanje udaljenosti (±2 do ±7 frameova) i
+histereza (0.5 / 1 m) prije traženja flipova isprobani su i ne pomažu: smanjuju dobit na
+`default`, a pod `high` ostaju oko nule.
+
+## 6. GBM postavke dead modela
+
+Jedna po jedna promjena prema zadanima (600 stabala, lr 0.1, 63 lista, min_samples_leaf 200).
+
+| varijanta | spellF1 default (20) | Δ | pobjede | Δ harsh | Δ lag | odluka |
+|---|---|---|---|---|---|---|
+| 200 stabala | 0.6528 | +0.0002 | 7/10 | +0.0002 | +0.0012 | možda (šum) |
+| lr 0.05 | 0.6526 | +0.0001 | 6/10 | −0.0005 | −0.0004 | možda (šum) |
+| min_samples_leaf 50 | 0.6531 | +0.0006 | 7/10 | +0.0007 | −0.0003 | možda (šum) |
+| min_samples_leaf 1000 | 0.6523 | −0.0003 | 5/10 | – | – | odbaci |
+| 15 listova | 0.6532 | +0.0006 | 5/10 | +0.0032 | +0.0059 | možda |
+| 100 stabala, 15 listova | 0.6564 | +0.0038 | 9/10 | +0.0081 | +0.0191 | možda |
+
+Manji dead model (100 stabala, 15 listova) jedini se izdvaja, i to u istom smjeru kao T_dead 2 i
+dead7 (manje samouvjeren P(dead)). Povrh prijedloga (`python -m solution.logo2 smalldead`) na
+`default` ne dodaje ništa (+0.0000 na 4 IDSSE, +0.0007 na 7 IDSSE uz T_dead 2), a u stres-regimima
+dodaje +0.005 (`harsh`) i +0.008 (`lag`). Ne ispunjava pravilo i nije u prijedlogu; za njega u
+predaji nema koda (trebao bi vlastite GBM postavke dead modela).
+
+## Odluka i prijedlog (krug 2)
+
+Pravilo ispunjava samo kombinacija **flip + P(dead) na 7 IDSSE + T_dead 2**: ugniježđena procjena
++0.0097 na `default`, 10/10 utakmica, `harsh` +0.0107, `lag` +0.0243, macroF1 +0.007. Sam flip
+(+0.0060 ugniježđeno) i sami dead7 / T_dead ostaju ispod praga 0.008.
+
+Predložene promjene zadanih vrijednosti (kod je dodan i po zadanom isključen):
+
+1. `solution/decode.py`: `SWITCH_COST` 14.0 → **20.0**
+2. `solution/decode.py`: `FLIP_FACTOR` None → **0.4** (`FLIP_RADIUS_M` 2.0 i `FLIP_WINDOW` 10 već
+   stoje)
+3. `solution/decode.py`: `DEAD_TEMPERATURE` None → **2.0**
+4. `solution/dead_model.py`: `IDSSE_TRAIN` "team" → **None** (dead model na svih 7 IDSSE; team
+   model ostaje na `model.IDSSE_TRAIN`, 4 utakmice)
+
+1 i 2 idu zajedno: SWITCH 20 bez flipa nije mjeren kao zasebna promjena i nije prijedlog.
+Konzervativnija inačica je samo 4 (+0.002, 9/10, bez štete u ijednom regimu); ne ispunjava prag.
+
+Rizik: dobit od flipa mjerena je na čistim pozicijama vanjskih utakmica. Pod pretpostavljenim
+šumom pozicije svodi se na nulu (`mid`) ili na −0.001 (`high`); koliki je šum automatskog
+praćenja, iz vanjskih podataka nije poznato. Dobit dead7 + T_dead ne ovisi o tome.
+
+### Strojno vrijeme (krug 2)
+
+Oko 1 h 30 min na 10 jezgri: `prep` 9 min (3 regima) + 24 min (dva regima šuma, uz druge poslove),
+`stack` 33 min (uz druge poslove), `flip` 4 min, `deadgbm` 11 min, `smalldead` 3 min, ostalo oko
+10 min.

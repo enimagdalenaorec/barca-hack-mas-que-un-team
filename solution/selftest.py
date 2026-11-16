@@ -73,6 +73,49 @@ def test_viterbi3_nan_and_tiny_inputs():
     assert decode.viterbi3(np.array([]), np.array([]), np.array([], bool), 10, 8, 8).shape == (0,)
 
 
+def test_viterbi3_per_frame_cost_equals_scalar_cost():
+    rng = np.random.default_rng(0)
+    p_dead, p_home = rng.random(500), rng.random(500)
+    forced = np.zeros(500, bool)
+    forced[:30] = True
+    a = decode.viterbi3(p_dead, p_home, forced, 3.0, 2.0, 1.0)
+    b = decode.viterbi3(p_dead, p_home, forced, np.full(500, 3.0), 2.0, 1.0)
+    assert (a == b).all()
+
+
+def test_flip_frames_marks_window_around_close_change_only():
+    d_home = np.r_[np.full(50, 1.0), np.full(50, 5.0), np.full(50, 9.0)]
+    d_away = np.r_[np.full(50, 5.0), np.full(50, 1.0), np.full(50, 20.0)]
+    mark = decode.flip_frames(d_home, d_away, 2.0, 3)   # flip at 50 (close), at 100 (9 m: no)
+    assert np.flatnonzero(mark).tolist() == list(range(47, 54))
+    d_away[50:60] = np.nan                               # ball lost at the change: no flip
+    assert not decode.flip_frames(d_home, d_away, 2.0, 3)[40:70].any()
+
+
+def test_labels_from3_options_off_and_flip_allows_short_spell():
+    arrays = synthetic_match(300)
+    arrays["players_xy"][:] = arrays["players_xy"][0]          # everyone stands still
+    home, away = arrays["players_xy"][0, 0], arrays["players_xy"][0, 11]
+    ball = np.tile(home, (300, 1))
+    ball[150:162] = away                                        # 12 frames at an away player
+    arrays["ball_xy"] = ball
+    p_home = np.full(300, .9)
+    p_home[150:162] = .2
+    p_dead = np.full(300, .02)
+    runs = [(0, 300)]
+    plain = model.labels_from3(p_home, p_dead, arrays, runs, (14, 20, 8), flip=None,
+                               dead_temperature=None)
+    assert (plain == model.pm.H).all()
+    flip = model.labels_from3(p_home, p_dead, arrays, runs, (14, 20, 8), flip=(0.3, 2.0, 5))
+    assert (flip[150:162] == model.pm.A).all() and (flip[:150] == model.pm.H).all()
+
+
+def test_tempered_identity_and_flattening():
+    p = np.r_[.1, .5, .9, np.nan]
+    assert np.allclose(decode.tempered(p, 1.0)[:3], p[:3]) and np.isnan(decode.tempered(p, 2.0)[3])
+    assert decode.tempered(p, 2.0)[0] > .1 and decode.tempered(p, 2.0)[2] < .9
+
+
 def test_pre_kickoff_mask_no_formation_is_all_false():
     arrays = synthetic_match(200)  # players scattered: no kick-off formation
     assert dead_ball.pre_kickoff_mask(arrays, [(0, 200)]).sum() == 0

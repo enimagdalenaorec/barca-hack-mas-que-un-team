@@ -24,6 +24,10 @@ from solution import augment, dead_features, model  # noqa: E402
 
 # Params
 MODEL_PATH = os.path.join(DATA_DIR, "cache", "dead_model.pkl")
+# Which converted IDSSE matches train the dead model: "team" = the team model's own set
+# (model.IDSSE_TRAIN), None = every converted one, or a tuple of match ids. The study:
+# python -m solution.logo2 dead7 flip final; docs/logo_external.md, "Krug 2".
+IDSSE_TRAIN = None
 
 _ROWS = {}
 
@@ -40,6 +44,17 @@ def rows(name, arrays, params=None):
         _, X = dead_features.compute(aug, arrays["runs"])
         _ROWS[key] = X[idx], arrays["dead"][idx].astype(np.int8)
     return _ROWS[key]
+
+
+def training_matches():
+    """The labelled matches the dead model trains on (IDSSE_TRAIN above)."""
+    if IDSSE_TRAIN == "team":
+        return model.training_matches()
+    saved, model.IDSSE_TRAIN = model.IDSSE_TRAIN, IDSSE_TRAIN
+    try:
+        return model.training_matches()
+    finally:
+        model.IDSSE_TRAIN = saved
 
 
 def fit(matches, params=None):
@@ -67,7 +82,7 @@ def fingerprint(matches, params):
 
 def load_or_train(params=None):
     """The saved model if it was trained exactly as the code now would, else a fresh one."""
-    matches = model.training_matches()
+    matches = training_matches()
     params = augment.regime(model.AUG_REGIME) if params is None else params
     if os.path.isfile(MODEL_PATH):
         with open(MODEL_PATH, "rb") as handle:
