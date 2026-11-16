@@ -37,6 +37,25 @@ SPECS = ("tracker", "default")
 ARMS = {"A": dict(smooth=False, touch=False), "B": dict(smooth=True, touch=False),
         "C": dict(smooth=True, touch=True)}
 OUT = os.path.join(os.path.dirname(L.CACHE_DIR), "smooth_train_exp.json")
+# Round 5 ("weights"): C, and C with every possession weighted equally in training -- each frame
+# weighs clip(8 s / its possession's length, 0.25, 4). spellF1 counts every possession once, but
+# frame-level training lets long possessions dominate. Idea from hadisotudeh/more-than-a-hack-2027.
+WEIGHT_ARMS = {"C": dict(smooth=True, touch=True, weights=False),
+               "D": dict(smooth=True, touch=True, weights=True)}
+SPELL_REF_FRAMES, SPELL_W = 8 * 25, (0.25, 4.0)
+
+
+def spell_weights(arrays):
+    """Per-frame weight clip(SPELL_REF_FRAMES / possession length) on the training labels."""
+    w = np.ones(len(arrays["owner"]))
+    owner = np.where(arrays["dead"], -1, arrays["owner"])
+    for start, stop in arrays["runs"]:
+        seg = owner[start:stop]
+        bounds = np.concatenate(([0], np.flatnonzero(np.diff(seg)) + 1, [len(seg)]))
+        for a, b in zip(bounds[:-1], bounds[1:]):
+            if seg[a] >= 0:
+                w[start + a:start + b] = np.clip(SPELL_REF_FRAMES / float(b - a), *SPELL_W)
+    return w
 
 _AUG, _TEAM, _DEAD = {}, {}, {}
 
@@ -80,10 +99,60 @@ def dead_rows(name, smooth):
     return _DEAD[key]
 
 
-def fit(parts):
+def fit(parts, weights=None):
     gbm = dict(M.GBM, max_features=L.REF.max_features, random_state=L.REF.rs)
-    return HistGradientBoostingClassifier(**gbm).fit(
-        np.concatenate([p[0] for p in parts]), np.concatenate([p[1] for p in parts]))
+    X = np.concatenate([p[0] for p in parts])
+    y = np.concatenate([p[1] for p in parts])
+    if weights is None:
+        return HistGradientBoostingClassifier(**gbm).fit(X, y)
+    return HistGradientBoostingClassifier(**gbm).fit(X, y, sample_weight=np.concatenate(weights))
+
+
+def team_weights(name):
+    """Weights aligned with team_rows(name, ...): same frames, both team views."""
+    arrays = L.data()[name]
+    idx = np.flatnonzero((arrays["owner"] >= 0) & ~arrays["dead"])[::M.SUBSAMPLE]
+    w = spell_weights(arrays)[idx]
+    return np.concatenate([w, w])
+
+
+def run_weights():
+    names = L.names()
+    specs = ("tracker", "default")
+    scores = {a: {s: np.zeros((len(names), len(T.SEEDS), 4)) for s in specs} for a in WEIGHT_ARMS}
+    for i, name in enumerate(names):
+        runs = L.data()[name]["runs"]
+        team_train, dead_train = L.train_names(name, "4"), L.train_names(name, "7")
+        parts = [team_rows(n, True, True) for n in team_train]
+        team = {"C": fit(parts), "D": fit(parts, [team_weights(n) for n in team_train])}
+        dead = fit([dead_rows(n, True) for n in dead_train])
+        for spec in specs:
+            for j, k in enumerate(T.SEEDS):
+                held = T.held_arrays(name, spec, k)
+                _, XD = dead_features.compute(held, runs)
+                common = dict(pd7=L2.dead_proba(dead, XD),
+                              forced=dead_ball.pre_kickoff_mask(held, runs))
+                for a in WEIGHT_ARMS:
+                    ph, d_us, d_them = T.held_inputs(name, held, runs, team[a], True)
+                    h = dict(common, ph=ph, d1_us=d_us, d1_them=d_them)
+                    scores[a][spec][i, j] = L2.score(name, L2.flip_codes(name, h, T.FINAL),
+                                                     full=True)
+        print("done", name, "C {:.3f} D {:.3f}".format(scores["C"]["tracker"][i, :, 0].mean(),
+                                                     scores["D"]["tracker"][i, :, 0].mean()),
+              flush=True)
+    features.TOUCH_FEATURES = True
+    with open(OUT.replace(".json", "_weights.json"), "w") as handle:
+        json.dump({a: {s: v.tolist() for s, v in d.items()} for a, d in scores.items()}, handle)
+    print("\n| arm | held-out ball | spellF1 | macroF1 | possessions pred / true |\n|---|---|---|---|---|")
+    for spec in specs:
+        for a in WEIGHT_ARMS:
+            print("| {} | {} | {:.4f} | {:.3f} | {:.0f} / {:.0f} |".format(
+                a, spec, L2.per_match(scores[a][spec]).mean(), scores[a][spec][:, :, 1].mean(),
+                scores[a][spec][:, :, 2].mean(), scores[a][spec][:, :, 3].mean()))
+    for spec in specs:
+        c, d = L2.per_match(scores["C"][spec]), L2.per_match(scores["D"][spec])
+        print("D vs C on {}: {:+.4f}, wins {}/10".format(spec, d.mean() - c.mean(),
+                                                         int((d > c + 1e-9).sum())))
 
 
 def run():
@@ -140,4 +209,4 @@ def report(names, scores):
 
 
 if __name__ == "__main__":
-    run()
+    run_weights() if sys.argv[1:] == ["weights"] else run()
