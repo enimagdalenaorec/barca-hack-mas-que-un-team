@@ -28,9 +28,18 @@ evaluation/scoreboard.csv
 
 # -- gated data --------------------------------------------------------------------------------
 # data/ is committed empty, with only its README, so the folder participants are told to unpack
-# into actually exists in a fresh clone. Everything they put in it stays out of git.
-data/*
+# into actually exists in a fresh clone. Everything they put in it stays out of git. `data/**`
+# ignores the whole tree recursively; the negation keeps only the placeholder README tracked.
+data/**
 !data/README.md
+
+# Raw tracking/event CSV exports are gated. The match payload under data/ is covered recursively;
+# the global rule below also catches stray CSV exports elsewhere. The negations keep the
+# deliberately published public ground truth and baseline CSVs visible; both are tracked already.
+data/**/*.csv
+*.csv
+!evaluation/gt/*_possession_gt_public.csv
+!evaluation/results/baseline_*.csv
 
 *.mp4
 *.gzip
