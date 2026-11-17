@@ -64,8 +64,18 @@ def fit(matches, params=None):
     return HistGradientBoostingClassifier(**model.GBM).fit(X, y)
 
 
+def fit_views(matches, params=None):
+    """[one model per de-lag in model.DEAD_DELAGS] (see model.DELAGS)."""
+    return [fit(matches, model.view_params(params, shift)) for shift in model.DEAD_DELAGS]
+
+
 def p_dead(clf, arrays, runs):
-    """P(dead) per frame; NaN outside the runs."""
+    """P(dead) per frame; NaN outside the runs. A list of models (fit_views): the mean over
+    their de-lagged views of the ball."""
+    if isinstance(clf, (list, tuple)):
+        assert len(clf) == len(model.DEAD_DELAGS)
+        return np.mean([p_dead(c, model.view_arrays(arrays, runs, shift), runs)
+                        for c, shift in zip(clf, model.DEAD_DELAGS)], axis=0)
     _, X = dead_features.compute(arrays, runs)
     p = np.full(len(X), np.nan)
     inside = ~np.isnan(X).all(axis=1)
@@ -77,7 +87,10 @@ def fingerprint(matches, params):
     """Everything the saved model depends on. A saved model with another fingerprint is stale."""
     return {"features": dead_features.NAMES, "gbm": model.GBM, "subsample": model.SUBSAMPLE,
             "matches": [name for name, arrays in matches if int(arrays["has_dead"])],
-            "augment": augment.settings(params)}
+            "augment": augment.settings(params), "versions": model.code_versions(),
+            "delags": model.DEAD_DELAGS,
+            "dead_feature_constants": repr(sorted(
+                (k, v) for k, v in vars(dead_features).items() if k.isupper()))}
 
 
 def load_or_train(params=None):
@@ -89,7 +102,12 @@ def load_or_train(params=None):
             saved = pickle.load(handle)
         if isinstance(saved, dict) and saved.get("fingerprint") == fingerprint(matches, params):
             return saved["model"]
-    clf = fit(matches, params)
+    from solution import download_external
+    model.require_matches(matches, model.expected_matches(
+        [m for _, m in download_external.MATCHES["idsse"]] if IDSSE_TRAIN is None else
+        (model.IDSSE_TRAIN if IDSSE_TRAIN == "team" else IDSSE_TRAIN)))
+    clf = fit_views(matches, params)
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     with open(MODEL_PATH, "wb") as handle:
         pickle.dump({"model": clf, "fingerprint": fingerprint(matches, params)}, handle)
     return clf

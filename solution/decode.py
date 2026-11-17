@@ -19,7 +19,14 @@ EPS = 1e-4  # keeps log() finite for a model that is (over)confident
 # (python -m solution.logo switch; docs/logo_external.md, e): 14 has the best held-out mean over
 # the grid 6-60, and a nested choice (pick on 9 matches, score the 10th) picks 14 in 10 of 10 folds.
 # With the flip rule below, the joint nested choice moves it to 20 ("Krug 2").
-SWITCH_COST = 20.0
+#
+# "Krug 6" (python -m solution.improve_run, external matches only): with the de-lagged views of
+# model.DELAGS and a 21-frame trailing-mean held-out ball, SWITCH_COST 12 / FLIP_FACTOR 0.8 /
+# DEAD_TEMPERATURE 3 score 0.6657 against 0.6597 for 20 / 0.4 / 2 (and 0.6485 for Version D), 9 of
+# 10 matches; a nested choice over 717 decoder settings (pick on 9, score the 10th) scores 0.6654.
+# These are the values of the "trailing" configuration; solution/tracker.py sets 20 / 0.4 / 2 back
+# for the "clean" one, where they were chosen.
+SWITCH_COST = 12.0
 # Three-state decoder (viterbi3, the default dead-ball path of the submission): leaving play
 # for a stoppage, and coming back. Leave one game out on the 10 external matches
 # (python -m solution.logo dead; docs/logo_external.md, b): the stop x restart grid is flat
@@ -34,11 +41,11 @@ RESTART_COST = 8.0
 # a short possession that starts and ends on such frames no longer has to outweigh two full
 # costs. Leave one game out on the 10 external matches, two held-out seeds, three ball-loss
 # regimes (python -m solution.logo2 flip final; docs/logo_external.md, "Krug 2").
-FLIP_FACTOR = 0.4
+FLIP_FACTOR = 0.8
 FLIP_RADIUS_M = 2.0
 FLIP_WINDOW = 10  # frames either side of the flip
 # Temperature on P(dead) before decoding: sigmoid(logit(p) / T). None = off. Same study.
-DEAD_TEMPERATURE = 2.0
+DEAD_TEMPERATURE = 3.0
 
 
 def viterbi(p_home, switch_cost):

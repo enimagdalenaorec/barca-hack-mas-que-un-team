@@ -163,6 +163,37 @@ def row_weights(arrays):
     return np.concatenate([w, w])
 
 
+# Views of the ball: one team model per de-lag (augment.TRACKER_DELAG, frames), trained on the
+# training balls de-lagged that much and applied to the match ball de-lagged the same way; P(home)
+# is the mean over the views. A causal tracker's ball lags its player; the views at 10 and 15
+# frames see it moved back, the view at 0 sees it as tracked. Leave one game out on the 10 external
+# matches with a 21-frame trailing-mean held-out ball, two seeds (python -m solution.improve_run;
+# docs/logo_external.md "Krug 6"): spellF1 0.6485 -> 0.6597 with the submitted decoding (8/10),
+# 0.6657 with decode's re-tuned costs (9/10; nested choice of the costs 0.6654, 8/10); harsh
+# +0.018, lag +0.026; 13- and 29-frame trailing means +0.022 / +0.021. (0,) = one model, as before;
+# the "clean" configuration (solution/tracker.py) uses (0,).
+DELAGS = (0, 10, 15)
+# The same for the dead-ball model (dead_model.py).
+DEAD_DELAGS = (0, 10)
+
+
+def view_params(params, shift):
+    """Augment params of the view de-lagged by `shift` frames."""
+    return dict(params or {}, TRACKER_DELAG=shift)
+
+
+def view_arrays(arrays, runs, shift):
+    """The match as the view de-lagged by `shift` frames sees it."""
+    if not shift:
+        return arrays
+    return dict(arrays, ball_xy=augment.delag(arrays["ball_xy"], runs, shift))
+
+
+def fit_views(matches, params=None):
+    """[one model per de-lag in DELAGS]."""
+    return [fit(matches, view_params(params, shift)) for shift in DELAGS]
+
+
 def fit(matches, params=None):
     parts = [rows(name, arrays, params) for name, arrays in matches]
     X = np.concatenate([p[0] for p in parts])
@@ -174,7 +205,12 @@ def fit(matches, params=None):
 
 
 def p_home(model, arrays, runs):
-    """P(home has the ball) per frame: the mean of the two team views."""
+    """P(home has the ball) per frame: the mean of the two team views -- and, when `model` is a
+    list (fit_views), the mean over its de-lagged views of the ball (DELAGS)."""
+    if isinstance(model, (list, tuple)):
+        assert len(model) == len(DELAGS)
+        return np.mean([p_home(m, view_arrays(arrays, runs, shift), runs)
+                        for m, shift in zip(model, DELAGS)], axis=0)
     _, X0 = features.compute(arrays, runs, swap=False)
     _, X1 = features.compute(arrays, runs, swap=True)
     p = np.full(len(X0), np.nan)
@@ -324,19 +360,46 @@ def learning_curve(matches, sizes=(3, 6, 9, 11), seed=0):
     return curve
 
 
+def code_versions():
+    """Versions a saved model also depends on: the converters' caches, every feature constant
+    and the libraries that fit it. Part of both models' fingerprints."""
+    import sklearn
+    consts = {k: v for k, v in vars(features).items() if k.isupper()}
+    return {"sample_games": sample_games.CACHE_VERSION,
+            "external_games": external_games.CACHE_VERSION,
+            "feature_constants": repr(sorted(consts.items())),
+            "sklearn": sklearn.__version__, "numpy": np.__version__}
+
+
+def require_matches(matches, expected):
+    """Stop instead of training on fewer matches than the submission was built on (a failed
+    download would otherwise change the file without an error)."""
+    missing = sorted(set(expected) - {name for name, _ in matches})
+    if missing:
+        raise SystemExit("training matches missing: {} -- run python -m "
+                         "solution.download_external".format(", ".join(missing)))
+
+
+def expected_matches(idsse):
+    return ["metrica{}".format(n) for n in sample_games.GAMES] + ["idsse_" + m for m in idsse]
+
+
 def fingerprint(matches, params=None):
     """Everything the saved model depends on. A saved model with another fingerprint is stale."""
     names = features.compute(matches[0][1], matches[0][1]["runs"][:1])[0]
     touch = {k: getattr(features, k) for k in dir(features) if k.startswith(("TOUCH", "CTRL"))}
     return {"features": names, "gbm": GBM, "matches": [name for name, _ in matches],
             "augment": augment.settings(params), "subsample": SUBSAMPLE, "control_s": CONTROL_S,
-            "touch": touch, "spell_weights": (SPELL_WEIGHTS, SPELL_REF_S, SPELL_W)}
+            "touch": touch, "spell_weights": (SPELL_WEIGHTS, SPELL_REF_S, SPELL_W),
+            "versions": code_versions(), "delags": DELAGS}
 
 
 def train_and_save(matches=None, params=None):
     matches = matches or training_matches()
     params = augment.regime(AUG_REGIME) if params is None else params
-    model = fit(matches, params)
+    require_matches(matches, expected_matches(IDSSE_TRAIN))
+    model = fit_views(matches, params)
+    os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
     with open(MODEL_PATH, "wb") as handle:
         pickle.dump({"model": model, "fingerprint": fingerprint(matches, params)}, handle)
     return model

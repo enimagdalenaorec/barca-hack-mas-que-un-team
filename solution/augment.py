@@ -45,8 +45,12 @@ LIVE_GAP_S = (2.0, 15.0)
 PLAYER_DROP_SHARE = 0.03
 PLAYER_DROP_S = (1.0, 10.0)
 TRACKER_SMOOTH_W = 21  # frames of trailing average on the ball; 1 = off (see step 5 above)
+# De-lag of the smoothed ball, frames: ball'[t] = ball[t + TRACKER_DELAG] inside each run (delag()
+# below). 0 = off. Not set here: model.DELAGS trains one model per de-lag ("views") and passes it
+# as an augment param.
+TRACKER_DELAG = 0
 PARAMS = ("BRIDGE_S", "HIDE_DEAD_P", "LIVE_GAP_SHARE", "LIVE_GAP_S", "PLAYER_DROP_SHARE",
-          "PLAYER_DROP_S", "TRACKER_SMOOTH_W")
+          "PLAYER_DROP_S", "TRACKER_SMOOTH_W", "TRACKER_DELAG")
 # Named overrides of the settings above, for training and for degrading held-out matches.
 # "harsh": more and longer live-play ball gaps, fewer hidden stoppages.
 REGIMES = {"default": {},
@@ -121,6 +125,7 @@ def augment(arrays, seed, params=None):
     ball = ball.astype(np.float32).astype(np.float64)
     if p["TRACKER_SMOOTH_W"] > 1:
         ball = trailing_mean(ball, int(p["TRACKER_SMOOTH_W"]))
+    ball = delag(ball, runs, int(p["TRACKER_DELAG"]))
     out["ball_xy"] = ball.astype(np.float32)
     out["players_xy"] = players.astype(np.float32)
     return out
@@ -136,3 +141,17 @@ def trailing_mean(ball, w):
     lo = np.maximum(0, hi - w)
     full = ((cn[hi] - cn[lo]) == hi - lo) & ~np.isnan(ball[:, 0])
     return np.where(full[:, None], (cs[hi] - cs[lo]) / (hi - lo)[:, None], np.nan)
+
+
+def delag(ball, runs, shift):
+    """The ball moved `shift` frames earlier inside each run: out[t] = ball[t + shift]; the last
+    `shift` frames of a run have no ball. A trailing mean over w frames lags the true ball by
+    (w - 1) / 2 frames; shifted by that much it is the centred mean. Used on the training
+    matches (augment) and on the match itself (model.p_home, dead_model.p_dead) alike."""
+    if not shift:
+        return ball
+    out = np.full_like(ball, np.nan)
+    for start, stop in runs:
+        if stop - start > shift:
+            out[start:stop - shift] = ball[start + shift:stop]
+    return out

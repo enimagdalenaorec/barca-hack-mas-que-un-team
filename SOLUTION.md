@@ -50,6 +50,23 @@ weighs clip(8 s / its possession's length, 0.25, 4)): tracker-like held-out ball
 (9 of 10), clean ball 0.584 -> 0.605 (10 of 10), more of the short possessions recovered
 (`python -m solution.smooth_train_exp weights`; docs/logo_external.md, "Krug 5").
 
+Round 6 makes the choice of tracker model **automatic and adds de-lagged views**. Training on a
+trailing-smoothed ball is right only if the competition tracker smooths causally; for a clean or
+symmetrically smoothed ball the earlier configuration is better (0.664 / 0.637 against 0.605 /
+0.604). `solution/tracker.py` measures, on the tracking it is given, how many frames the ball
+lags its nearest player (external matches: -6..0 clean, -6..-2 Gaussian, +4..+8 trailing) and
+`solution.pipeline` uses the trailing configuration at a lag of +2 frames or more, the clean one
+(the earlier karlo-v2 configuration, byte-identical training inputs) otherwise. The trailing
+configuration now averages three team models trained and applied on the ball moved 0, 10 and 15
+frames earlier (two for the dead model), with decoder costs 12 / 0.8 / 3: tracker-like held-out
+ball 0.649 -> **0.666** (nested 0.665, 9 of 10), harsh +0.018, lag +0.026
+(`python -m solution.improve_run`; docs/logo_external.md, "Krug 6").
+
+Round 7 gives the clean configuration the per-possession weights as well: clean held-out ball
+0.664 -> **0.677** (8 of 10), Gaussian-smoothed 0.637 -> **0.649** (7 of 10)
+(`python -m solution.clean_exp fold 0 1 2 3 4 5 6 7 8 9 && python -m solution.clean_exp report`;
+docs/logo_external.md, "Krug 7").
+
 ## Reproduce
 
 Python 3.9 to 3.12 (numpy 2.0.2 has no 3.13 wheels), about 2 GB of free disk during the download
@@ -75,12 +92,22 @@ download deleted:
 .venv/bin/python -m solution.download_external
 ```
 
-Generate the submission. It trains the model on first use (seeded, so the same data always gives
-the same model) and writes `evaluation/results/model_viterbi.csv`:
+Generate the submission. One command deletes any saved models, runs the self-checks, converts
+the training matches, detects the tracker kind, trains, writes
+`evaluation/results/Mas que un team.csv`, validates it and prints its SHA-256; with `--clean` it
+then rebuilds everything in a clean copy with a fresh virtual environment and compares the hashes.
+Each step's output goes to `logs/`:
 
 ```bash
-.venv/bin/python -m solution.pipeline
-.venv/bin/python evaluation/validate_submission.py evaluation/results/model_viterbi.csv
+./make_submission.sh "Mas que un team"
+./make_submission.sh "Mas que un team" --clean
+```
+
+The same by hand (training is seeded, so the same data always gives the same models):
+
+```bash
+.venv/bin/python -m solution.pipeline --name "Mas que un team"
+.venv/bin/python evaluation/validate_submission.py "evaluation/results/Mas que un team.csv"
 ```
 
 ## Other commands
@@ -95,6 +122,9 @@ the same model) and writes `evaluation/results/model_viterbi.csv`:
 .venv/bin/python -m solution.pipeline --method rule  # the baseline rule with our dead-ball fix
 .venv/bin/python -m solution.pipeline --dead rule    # the 2 s dead-ball rule instead of the learned one
 .venv/bin/python -m solution.selftest                # self-checks on synthetic data
+.venv/bin/python -m solution.tracker                 # the ball-lag statistic on the external matches
+.venv/bin/python -m solution.robust_exp report       # both configurations on clean / trailing / Gaussian held-out balls
+.venv/bin/python -m solution.improve_run ref         # round 6: de-lagged views and decoder costs
 ```
 
 The training data is pinned to fixed revisions (`solution/download_external.py`), and the

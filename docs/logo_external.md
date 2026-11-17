@@ -647,3 +647,76 @@ hadisotudeh/more-than-a-hack-2027). Na verziji C (zaglađene lopte + dodiri):
 
 Odluka: **usvoji** (dobitak ≥ 0.008, ≥ 7 pobjeda, na oba tipa lopte). `model.SPELL_WEIGHTS`;
 provjereno da model uči na identičnim redcima i težinama kao testirana verzija D.
+
+
+# Krug 6: koji tracker, i lopta vraćena u vrijeme (solution/robust_exp.py, solution/tracker.py, solution/improve_run.py)
+
+**Model trackera nije jedini mogući.** Verzija D je oklada da natjecateljski tracker zaglađuje
+loptu kauzalno (pomični prosjek unatrag, 21 frame). Simetrični Gaussov filtar (sigma 6 frameova)
+jednako dobro reproducira agregatne percentile akceleracije lopte. Isti harness, 10 utakmica,
+2 seeda, ista dekodiranja (`robust_exp`):
+
+| held-out lopta | karlo-v2 (čista lopta, bez dodira) | verzija D |
+|---|---|---|
+| čista | **0.6641** | 0.6050 |
+| trailing w21 | 0.5146 | **0.6485** |
+| Gauss sigma 6 | **0.6367** | 0.6042 |
+
+**Pipeline sam odlučuje.** Kauzalni filtar ostavlja loptu gdje je njen igrač *bio*. Za svaki
+pomak od -20 do +20 frameova medijan udaljenosti lopte do najbližeg igrača pomaknutog za taj
+broj frameova; pomak s najmanjim medijanom je kašnjenje (`solution/tracker.py`). Na 10 vanjskih
+utakmica: čista lopta -6..0, Gauss -6..-2, trailing w21 +4..+8 frameova, bez preklapanja. Prag
++2 je između. Kašnjenje >= 2: konfiguracija "trailing" (verzija D + ovaj krug), inače "clean"
+(karlo-v2, provjereno hashom da su ulazi u učenje bajt-identični). Jedna statistika ulaza cijele
+utakmice, isti kod na svakoj utakmici, prag postavljen samo na vanjskim utakmicama.
+
+**De-lag pogledi (konfiguracija "trailing").** Tri modela momčadi, svaki učen na trailing-21
+lopti pomaknutoj 0, 10 i 15 frameova unaprijed unutar svakog runa (`ball'[t] = ball[t + pomak]`);
+lopta utakmice dobiva iste pomake i P(home) je prosjek tri pogleda. Dead model isto s pogledima
+0 i 10. Uz to troškovi dekodera za te vjerojatnosti: switch 12, flip faktor 0.8, temperatura
+P(dead) 3 (mreža od 717 postavki na trail21).
+
+| varijanta (trail21, 2 seeda) | spellF1 | pobjede | harsh | lag | čista | Gauss 6 | trail13 / trail29 | macroF1 |
+|---|---|---|---|---|---|---|---|---|
+| verzija D | 0.6485 | ref | | | 0.6050 | 0.6042 | | 0.919 |
+| D, samo novi dekoder (ugniježđeno) | 0.6523 | 7/10 | +0.002 | +0.003 | -0.005 | -0.001 | | 0.920 |
+| pogledi 0+10+15, dekoder D | 0.6597 | 8/10 | +0.012 | +0.019 | +0.024 | +0.010 | +0.018 / +0.019 | 0.922 |
+| pogledi 0+10+15, dekoder ugniježđeno | 0.6654 | 8/10 | +0.017 | +0.027 | +0.024 | +0.009 | +0.023 / +0.022 | 0.923 |
+| **pogledi 0+10+15, 12 / 0.8 / 3 (predano)** | **0.6657** | **9/10** | **+0.018** | **+0.026** | +0.026 | +0.012 | +0.022 / +0.021 | 0.923 |
+
+Pravilo (dobitak >= 0.008, >= 7 pobjeda, harsh/lag >= -0.005): **usvoji**. Pogledi 0+10,
+0+10+15 i 0+5+10+15 razlikuju se za ~0.003 (šum), izbor 0+10+15 među njima nije ugniježđen;
+pošten očekivani dobitak je oko +0.014 do +0.017. Drugi korak mreže dekodera bio je usidren na
+tri najbolje postavke prvog koraka sa svih 10 utakmica, pa ugniježđena procjena malo curi; samo
+prvi korak dao je 0.6623-0.6629. Sami troškovi dekodera bez pogleda ne pomažu (+0.004).
+
+Odbačeno u ovom krugu (detalji u `solution/improve_run.py`): jedan model na de-lag 5, 10 ili 15
+(dobitak, ali 4-5/10 pobjeda); de-lag samo flip dokaza; težine posjeda 4 s ili 16 s i njihovi
+ansambli.
+
+Brojevi iz `logo` / `logo2` od sada: ti moduli čitaju `augment.TRACKER_SMOOTH_W` i troškove
+dekodera iz modula, pa za stare brojke treba postaviti konfiguraciju "clean" (`tracker.apply`).
+
+
+# Krug 7: može li bolje i konfiguracija "clean" (solution/clean_exp.py)
+
+Konfiguracija "clean" radi kad lopta trackera ne kasni (`solution/tracker.py`): čista ili
+simetrično zaglađena lopta. Zato se mjeri na čistoj i na Gauss (sigma 6) held-out lopti, svaka pod
+default / harsh / lag, 10 utakmica, 2 seeda, dekodiranje kao predano (20 / 0.4 / 2). Svi modeli
+uče na čistoj lopti, jedan pogled, dead model na čistoj lopti.
+
+| varijanta | lopta | spellF1 | Δ | pobjede | Δ harsh | Δ lag | macroF1 |
+|---|---|---|---|---|---|---|---|
+| K (karlo-v2) | čista | 0.6641 | ref | | | | 0.922 |
+| **W = K + težine posjeda** | čista | **0.6769** | **+0.013** | **8/10** | +0.017 | +0.014 | 0.923 |
+| TW = K + dodiri + težine | čista | 0.7124 | +0.048 | 9/10 | +0.048 | +0.048 | 0.931 |
+| K | Gauss 6 | 0.6367 | ref | | | | 0.917 |
+| **W** | Gauss 6 | **0.6487** | **+0.012** | **7/10** | +0.015 | +0.012 | 0.916 |
+| TW | Gauss 6 | 0.6362 | -0.001 | 4/10 | +0.001 | +0.003 | 0.916 |
+
+Pravilo (unaprijed: dobitak >= 0.008 na čistoj lopti, >= 7 pobjeda, harsh/lag >= -0.005, na
+Gauss lopti ne ispod -0.005): W i TW prolaze. Lopta natjecateljskog trackera je zaglađena
+(agregati, krug 3b), a kad "clean" radi, ona ne kasni, dakle bliža je Gauss slučaju; tamo dodiri
+ne pomažu (TW 0.636), a težine da (W 0.649). **Usvojen W**: `tracker.CONFIGS["clean"]`
+`SPELL_WEIGHTS = True`. Retki modela su isti kao u testu (round 5 je provjerio
+`model.row_weights` = `team_weights`).

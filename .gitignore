@@ -62,3 +62,7 @@ __pycache__/
 venv/
 env/
 .DS_Store
+
+# make_submission.sh logs (output of runs on the match)
+logs/
+/.venv

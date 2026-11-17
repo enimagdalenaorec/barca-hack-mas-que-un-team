@@ -125,10 +125,17 @@ if __name__ == "__main__":
     parser.add_argument("--dead", choices=("rule", "model"), default=DEAD,
                         help="model method only: dead-ball rule or learned P(dead)")
     parser.add_argument("--name", default=None, help="file name on the board, without .csv")
+    parser.add_argument("--tracker", choices=("auto", "trailing", "clean"), default="auto",
+                        help="model configuration: detected from the ball's lag (solution/tracker.py)"
+                             " or forced")
     args = parser.parse_args()
 
     arrays, runs = tracking.load(GAME), graded_runs(GAME)
     if args.method == "model":
+        from solution import tracker
+        kind = tracker.detect(arrays, runs) if args.tracker == "auto" else args.tracker
+        tracker.apply(kind)
+        print("configuration: {} ({})".format(kind, "detected" if args.tracker == "auto" else "forced"))
         labels = build_model(arrays, runs, args.dead)
         name = args.name or "model_viterbi"
     else:

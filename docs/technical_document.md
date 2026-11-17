@@ -3,21 +3,26 @@
 More than a Hack 2027, Phase 1. FC Barcelona vs Athletic Club: 199,319 frames, each labelled H, A,
 D or X.
 
-**In one paragraph.** Two gradient-boosted tree models, trained only on matches from other games,
-give two probabilities for every frame: P(home has the ball), from 65 per-team features that
-include detected ball touches, and P(ball out of play), from 16 player-movement features. One three-state Viterbi pass per half
+**In one paragraph.** Gradient-boosted tree models, trained only on matches from other games,
+give two probabilities for every frame: P(home has the ball), from per-team features, and P(ball
+out of play), from 16 player-movement features. One three-state Viterbi pass per half
 (home / away / dead) turns them into whole possessions and stoppages. Frames before each half's
 kick-off, which is found in the tracking, are forced dead. Every choice was made by
 leave-one-game-out on 10 external matches (3 Metrica, 7 IDSSE), scored with the organisers'
-metric library, under a written adoption rule. The competition match and its public 5 minutes
-chose nothing. The last step trains both models on a ball smoothed the way the competition tracker
-smooths its ball (one number, from aggregate statistics of that ball). On held-out matches given
-that same smoothed ball, the submitted configuration reaches spellF1 **0.649** (macroF1 0.919),
-against 0.515 for the same pipeline trained on clean balls without touches, better on 10 of 10
-matches. On clean held-out balls the order reverses (0.605 against 0.664): the model is trained
-for the competition's ball, not for clean ones. The published baseline rule scores 0.347 on
-clean held-out balls. The code is in `solution/`; the experiments are in
-[logo_external.md](logo_external.md) (current) and [experiments.md](experiments.md) (history).
+metric library, under a written adoption rule; the competition match and its public 5 minutes
+chose nothing. The competition tracker smooths its ball, and how it smooths decides which
+configuration is best, so before training the pipeline measures one statistic of the tracking it
+is given -- whether the ball lags its players -- and picks one of two configurations (section 1,
+"Which tracker"). **Clean** (no lag): 51 features, models trained on clean balls with every
+possession weighted equally; held-out spellF1 **0.677** on clean balls and **0.649** on
+symmetrically smoothed ones (macroF1 0.923 / 0.916), against 0.664 / 0.637 without the weights.
+**Trailing** (the ball lags, as behind a causal filter): models trained on a ball smoothed like
+that, with ball-touch features, equal possession weights and three de-lagged views of the ball;
+**0.666** on held-out balls smoothed that way (macroF1 0.923), against 0.515 for the clean
+configuration. The published baseline rule scores 0.347 on clean held-out balls. Which
+configuration ran is written to the pipeline's log. The code is in `solution/`; the experiments
+are in [logo_external.md](logo_external.md) (current) and [experiments.md](experiments.md)
+(history).
 
 ## 1. Approach, and why
 
@@ -232,6 +237,49 @@ assumption) the flip gain shrinks to zero; the sharp touch detector still gained
 mid level and +0.022 under the high one, but lost −0.040 under 20 cm of per-frame ball jitter,
 which a light 0.2 s smoothing turned into +0.108.
 
+**Which tracker made our ball: the pipeline checks before it trains.** Training on a smoothed
+ball is a bet on *how* the competition tracker smooths. Two models of it reproduce the aggregate
+acceleration statistics of our ball equally well: a causal trailing mean over 21 frames (what a
+live tracker does) and a symmetric Gaussian filter (sigma 6 frames, what an offline smoother
+does). On the 10 held-out matches they call for opposite configurations:
+
+| held-out ball | clean-ball configuration (no touches, clean training) | trailing configuration (above) |
+|---|---|---|
+| clean | **0.664** | 0.605 |
+| trailing mean, 21 frames | 0.515 | **0.649** |
+| Gaussian, sigma 6 | **0.637** | 0.604 |
+
+The two differ in one measurable way: a causal smoother leaves the ball where its player *was*.
+`solution/tracker.py` computes, for each shift of -20 to +20 frames, the median distance from the
+ball to the nearest player at that shift, and takes the shift with the smallest median. On the 10
+external matches it is -6 to 0 frames for clean balls, -6 to -2 for Gaussian-smoothed ones and +4
+to +8 for trailing-smoothed ones, with no overlap; the threshold (+2) sits between them. The
+pipeline computes this statistic on the tracking it is given and uses the trailing configuration
+when the ball lags, the clean-ball configuration otherwise (`--tracker trailing|clean` forces
+either). It is one whole-match statistic of the input, read by the same code on every match; no
+label and no frame of the competition match is involved, and the threshold was fixed on external
+matches only. With the clean-ball configuration the code produces byte-identical training inputs
+to the version before touches (checked by hash). Which configuration ran is written to the
+pipeline's log.
+
+**De-lagged views (trailing configuration).** A trailing mean over 21 frames puts the ball where
+it was about 10 frames ago. Instead of trusting one guess of that lag, the trailing configuration
+trains three team models on the training ball moved 0, 10 and 15 frames earlier within each run
+(and two dead-ball models, 0 and 10), applies each to the match ball moved the same way, and
+averages their probabilities. With decoder costs re-chosen for those probabilities (switch 12,
+flip factor 0.8, P(dead) temperature 3, from a 717-setting grid), held-out spellF1 on the
+trailing-smoothed ball rises from 0.649 to **0.666** (nested choice of the costs 0.665), better on
+9 of 10 matches, +0.018 under `harsh`, +0.026 under `lag`, and also higher with 13- and 29-frame
+trailing means (+0.022 / +0.021), on clean balls (+0.026) and on Gaussian ones (+0.012). The clean
+configuration keeps one model and the costs 20 / 0.4 / 2 it was chosen with.
+
+**Possession weights for the clean configuration too.** The per-possession sample weights (each
+possession counts the same in training) also help the clean configuration on its own: held-out
+spellF1 0.664 -> **0.677** on clean balls (8 of 10 matches, harsh +0.017, lag +0.014) and 0.637 ->
+**0.649** on Gaussian-smoothed balls (7 of 10). Adding the touch features as well gained more on
+perfectly clean balls (0.712) but nothing on smoothed ones (0.636), and our ball is smoothed, so
+the clean configuration is karlo-v2's models with those weights (`solution/clean_exp.py`).
+
 **Tried and dropped** (details and numbers in [logo_external.md](logo_external.md) and
 [experiments.md](experiments.md)):
 
@@ -248,6 +296,9 @@ which a light 0.2 s smoothing turned into +0.108.
   the dead model.
 - Training with position noise or under harsher ball-loss regimes.
 - A bigger team model.
+- On the trailing ball: one model on a single de-lagged ball (gains, but on only 4–5 of 10
+  matches); de-lagging only the flip evidence; possession weights of 4 s or 16 s and ensembles of
+  weights; re-tuned decoder costs without the views (+0.004).
 
 ## 2. Assets we used, and how
 
@@ -375,15 +426,22 @@ repository root:
 python3 -m venv .venv
 .venv/bin/pip install -r requirements-solution.txt
 # put the four tactical match files in data/tactical/ (see DATA.md)
+./make_submission.sh "Mas que un team"          # selftest, training data, pipeline, validation, SHA-256
+./make_submission.sh "Mas que un team" --clean  # the same, then again in a clean copy with a fresh venv; compares hashes
+```
+
+`make_submission.sh` deletes any saved models first, runs the steps below quietly (each step's
+output in `logs/`), and writes `evaluation/results/Mas que un team.csv`. The steps by hand:
+
+```bash
 .venv/bin/python -m solution.download_external      # fetch (or read local copies) + convert the training matches
-.venv/bin/python -m solution.pipeline               # train (first run) and write the file
-.venv/bin/python evaluation/validate_submission.py evaluation/results/model_viterbi.csv
+.venv/bin/python -m solution.pipeline --name "Mas que un team"   # detect the tracker kind, train, write the file
+.venv/bin/python evaluation/validate_submission.py "evaluation/results/Mas que un team.csv"
 ```
 
 On Windows, use `py -3.12 -m venv .venv` and `.venv/Scripts/python`.
 
-The output, `evaluation/results/model_viterbi.csv`, is the submission. It is uploaded under the
-team's name.
+The output, `evaluation/results/Mas que un team.csv`, is the submission.
 
 - **Deterministic:** the training data is pinned to fixed revisions, augmentation and models are
   seeded, and the file is byte-identical whether training runs on 1 CPU thread or 8. Raw files
@@ -391,6 +449,10 @@ team's name.
   byte-identical to the pinned revisions.
 - `python -m solution.logo <name>` and `python -m solution.logo2 <name>` rerun the external
   leave-one-game-out experiments.
-- `python -m solution.selftest` runs 17 self-checks on synthetic data.
+- Training stops with an error if any of the pinned training matches is missing, instead of
+  silently training on fewer; saved models carry a fingerprint of every setting, feature
+  constant, converter version and library version they depend on, and retrain when it differs.
+- `python -m solution.tracker` prints the lag statistic on the external matches.
+- `python -m solution.selftest` runs 18 self-checks on synthetic data.
 
 The match data is never committed: `data/` is gitignored.

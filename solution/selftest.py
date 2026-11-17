@@ -179,6 +179,30 @@ def test_controlled_contested_phase_stays_with_last_team():
     assert (out == 0).all()
 
 
+def test_tracker_detects_lagging_ball_and_restores_configs():
+    from solution import augment, features, model, tracker
+    rng = np.random.default_rng(0)
+    n = 3000
+    walk = np.cumsum(rng.normal(0, 0.3, size=(n, 2)), axis=0) + 50.0
+    players = np.full((n, 4, 2), np.nan)
+    players[:, 0] = walk
+    players[:, 1:] = walk[:, None, :] + rng.normal(0, 10, size=(1, 3, 2))
+    runs = [(0, n)]
+    on_time = {"ball_xy": walk.copy(), "players_xy": players}
+    lagged = {"ball_xy": np.vstack([np.full((10, 2), np.nan), walk[:-10]]), "players_xy": players}
+    assert tracker.best_lag(on_time, runs) == 0
+    assert tracker.best_lag(lagged, runs) == 10
+    assert tracker.detect(on_time, runs) == "clean" and tracker.detect(lagged, runs) == "trailing"
+    saved = (augment.TRACKER_SMOOTH_W, features.TOUCH_FEATURES, model.SPELL_WEIGHTS)
+    try:
+        tracker.apply("clean")
+        assert (augment.TRACKER_SMOOTH_W, features.TOUCH_FEATURES, model.SPELL_WEIGHTS) == (1, False, True)
+        tracker.apply("trailing")
+        assert (augment.TRACKER_SMOOTH_W, features.TOUCH_FEATURES, model.SPELL_WEIGHTS) == (21, True, True)
+    finally:
+        augment.TRACKER_SMOOTH_W, features.TOUCH_FEATURES, model.SPELL_WEIGHTS = saved
+
+
 def main():
     tests = [(name, fn) for name, fn in globals().items() if name.startswith("test_") and callable(fn)]
     for name, fn in tests:
