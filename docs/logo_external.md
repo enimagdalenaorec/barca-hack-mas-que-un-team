@@ -633,3 +633,17 @@ brojkama zaglađena, pa je predana verzija C (tim se složio 2026-11-17): `augme
 = 21` (korak 5 augmentacije, i za model momčadi i za dead model), dodiri uključeni. Provjereno da
 nova augmentacija daje identičnu loptu kao testirana verzija C. Najveća pretpostavka: oblik
 zaglađivanja natjecateljskog trackera poznajemo samo iz dvije agregatne brojke.
+
+# Krug 5: jednaka težina svakog posjeda u učenju (smooth_train_exp weights)
+
+spellF1 broji svaki posjed jednom, a učenje po frameovima daje prednost dugim posjedima. Svaki
+frame modela momčadi dobiva težinu clip(8 s / duljina njegovog posjeda, 0.25, 4) (ideja iz
+hadisotudeh/more-than-a-hack-2027). Na verziji C (zaglađene lopte + dodiri):
+
+| verzija | `tracker` | čista lopta | posjeda pred./istina (`tracker`) |
+|---|---|---|---|
+| C | 0.6272 | 0.5837 | 303 / 412 |
+| **D = C + težine** | **0.6485** (+0.021, 9/10) | 0.6050 (+0.021, 10/10) | 332 / 412 |
+
+Odluka: **usvoji** (dobitak ≥ 0.008, ≥ 7 pobjeda, na oba tipa lopte). `model.SPELL_WEIGHTS`;
+provjereno da model uči na identičnim redcima i težinama kao testirana verzija D.

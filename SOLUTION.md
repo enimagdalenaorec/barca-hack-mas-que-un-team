@@ -45,6 +45,11 @@ spellF1 0.515 -> **0.627** (with touches), 10 of 10 matches; on clean held-out b
 0.664 -> 0.584, because the model is now trained for the competition ball
 (`python -m solution.smooth_train_exp`; docs/logo_external.md, "Krug 4").
 
+Round 5 makes **every possession count the same in training** (`model.SPELL_WEIGHTS`: each frame
+weighs clip(8 s / its possession's length, 0.25, 4)): tracker-like held-out ball 0.627 -> **0.649**
+(9 of 10), clean ball 0.584 -> 0.605 (10 of 10), more of the short possessions recovered
+(`python -m solution.smooth_train_exp weights`; docs/logo_external.md, "Krug 5").
+
 ## Reproduce
 
 Python 3.9 to 3.12 (numpy 2.0.2 has no 3.13 wheels), about 2 GB of free disk during the download

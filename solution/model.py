@@ -130,11 +130,47 @@ def _rows(name, arrays, params=None):
     return np.concatenate(xs), np.concatenate(ys)
 
 
+# Every possession counts the same in training: each frame weighs clip(SPELL_REF_S / the length of
+# its possession, SPELL_W). spellF1 counts each possession once, but frame-level training lets long
+# possessions dominate. Idea from hadisotudeh/more-than-a-hack-2027. Leave one game out on the 10
+# external matches, on top of smoothed-ball training and touches (python -m solution.smooth_train_exp
+# weights): tracker-like held-out ball 0.627 -> 0.649 (9/10), clean ball 0.584 -> 0.605 (10/10),
+# predicted possessions 303 -> 332 against 412 true.
+SPELL_WEIGHTS = True
+SPELL_REF_S = 8.0
+SPELL_W = (0.25, 4.0)
+
+
+def spell_weights(arrays):
+    """Per-frame weight clip(SPELL_REF_S * FPS / possession length, SPELL_W) on the labels."""
+    w = np.ones(len(arrays["owner"]))
+    owner = np.where(arrays["dead"], -1, arrays["owner"])
+    for start, stop in arrays["runs"]:
+        seg = owner[start:stop]
+        bounds = np.concatenate(([0], np.flatnonzero(np.diff(seg)) + 1, [len(seg)]))
+        for a, b in zip(bounds[:-1], bounds[1:]):
+            if seg[a] >= 0:
+                w[start + a:start + b] = np.clip(SPELL_REF_S * 25 / float(b - a), *SPELL_W)
+    return w
+
+
+def row_weights(arrays):
+    """Weights aligned with rows(): the same frames, both team views."""
+    keep = arrays["owner"] >= 0
+    if int(arrays["has_dead"]):
+        keep &= ~arrays["dead"]
+    w = spell_weights(arrays)[np.flatnonzero(keep)[::SUBSAMPLE]]
+    return np.concatenate([w, w])
+
+
 def fit(matches, params=None):
     parts = [rows(name, arrays, params) for name, arrays in matches]
     X = np.concatenate([p[0] for p in parts])
     y = np.concatenate([p[1] for p in parts])
-    return HistGradientBoostingClassifier(**GBM).fit(X, y)
+    if not SPELL_WEIGHTS:
+        return HistGradientBoostingClassifier(**GBM).fit(X, y)
+    w = np.concatenate([row_weights(arrays) for _, arrays in matches])
+    return HistGradientBoostingClassifier(**GBM).fit(X, y, sample_weight=w)
 
 
 def p_home(model, arrays, runs):
@@ -294,7 +330,7 @@ def fingerprint(matches, params=None):
     touch = {k: getattr(features, k) for k in dir(features) if k.startswith(("TOUCH", "CTRL"))}
     return {"features": names, "gbm": GBM, "matches": [name for name, _ in matches],
             "augment": augment.settings(params), "subsample": SUBSAMPLE, "control_s": CONTROL_S,
-            "touch": touch}
+            "touch": touch, "spell_weights": (SPELL_WEIGHTS, SPELL_REF_S, SPELL_W)}
 
 
 def train_and_save(matches=None, params=None):

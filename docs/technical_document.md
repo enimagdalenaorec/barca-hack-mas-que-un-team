@@ -12,9 +12,9 @@ leave-one-game-out on 10 external matches (3 Metrica, 7 IDSSE), scored with the 
 metric library, under a written adoption rule. The competition match and its public 5 minutes
 chose nothing. The last step trains both models on a ball smoothed the way the competition tracker
 smooths its ball (one number, from aggregate statistics of that ball). On held-out matches given
-that same smoothed ball, the submitted configuration reaches spellF1 **0.627** (macroF1 0.918),
+that same smoothed ball, the submitted configuration reaches spellF1 **0.649** (macroF1 0.919),
 against 0.515 for the same pipeline trained on clean balls without touches, better on 10 of 10
-matches. On clean held-out balls the order reverses (0.584 against 0.664): the model is trained
+matches. On clean held-out balls the order reverses (0.605 against 0.664): the model is trained
 for the competition's ball, not for clean ones. The published baseline rule scores 0.347 on
 clean held-out balls. The code is in `solution/`; the experiments are in
 [logo_external.md](logo_external.md) (current) and [experiments.md](experiments.md) (history).
@@ -132,7 +132,17 @@ team model and the dead-ball model. Leave one game out, two seeds, decoded as su
 |---|---|---|---|
 | clean balls (the configuration before this step) | off | 0.515 | **0.664** |
 | smoothed balls | off | 0.610 (10/10) | 0.570 |
-| **smoothed balls (submitted)** | on | **0.627** (10/10) | 0.584 |
+| smoothed balls | on | 0.627 (10/10) | 0.584 |
+| **smoothed balls + equal weight per possession (submitted)** | on | **0.649** (10/10) | 0.605 |
+
+*Every possession counts the same in training.* spellF1 counts each possession once, but frame-level
+training lets long possessions dominate: a 40-second possession has twenty times the frames of a
+2-second one. So each training frame of the team model weighs clip(8 s / the length of its
+possession, 0.25, 4), as in the public solution hadisotudeh/more-than-a-hack-2027. On top of
+smoothed-ball training and touches: `tracker` ball 0.627 → 0.649 (9 of 10 matches), clean ball
+0.584 → 0.605 (10 of 10), and predicted possessions 303 → 332 against 412 in the labels — it
+recovers part of the short possessions we were missing (`python -m solution.smooth_train_exp
+weights`).
 
 Each model is best on the kind of ball it was trained on. The competition ball is, by the
 aggregate statistics above, the smoothed kind, so the submission is trained on it. The smoothing
@@ -187,12 +197,13 @@ scored on the 10th. The seed of the held-out degradation alone moves the mean by
 smaller differences are noise.
 
 The table below is on clean held-out balls, the yardstick of every round before the last; the
-submitted configuration is the one trained on smoothed balls (previous section: **0.627** on the
-`tracker` held-out ball against 0.515, but 0.584 on clean ones).
+submitted configuration is the one trained on smoothed balls with equal possession weights
+(previous section: **0.649** on the `tracker` held-out ball against 0.515, but 0.605 on clean ones).
 
 | held-out, 10 matches, 2 seeds, clean ball | spellF1 | Metrica (3) | IDSSE (7) | macroF1 | `harsh` | `lag` |
 |---|---|---|---|---|---|---|
-| submitted: smoothed training + touch features | 0.584 | 0.685 | 0.540 | 0.903 | | |
+| submitted: smoothed training + touches + equal possession weights | 0.605 | | | 0.902 | | |
+| smoothed training + touch features | 0.584 | 0.685 | 0.540 | 0.903 | | |
 | clean training + touch features, ball smoothed 1 s | 0.703 | 0.790 | 0.665 | 0.931 | 0.666 | 0.687 |
 | + sharp touch features (not submitted: blind on our ball) | 0.748 | 0.845 | 0.706 | 0.939 | 0.708 | 0.734 |
 | before touches (fixed settings) | 0.664 | 0.751 | 0.627 | 0.922 | 0.628 | 0.650 |
@@ -252,12 +263,12 @@ which a light 0.2 s smoothing turned into +0.108.
 **The public 5 minutes.** The public window is used only to check that the file is correct: teams
 not swapped, frames aligned, a sensible possession count. Every setting of the submitted
 configuration was chosen by the external harness (section 1). Scored once as that check, the
-submitted file has spellF1 0.503 / macroF1 0.707, with 14 possessions against 17 in the truth and
-team accuracy 0.92 where both are alive. The configuration before the last two steps (clean-ball
-training, no touches) scores 0.600 / 0.720 there, with 15 possessions; the smoothed published
-baseline scores 0.326 / 0.621. Per frame the two are level (team accuracy 0.925 against 0.931,
-dead-ball F1 0.912 for both); the spellF1 gap is one or two of the 17 possessions, and the window
-did not decide between them — the `tracker` regime on 10 external matches did.
+submitted file has spellF1 0.503 / macroF1 0.706, with 14 possessions against 17 in the truth and
+team accuracy 0.927 where both are alive. Without equal possession weights the same check gave
+0.503 / 0.707 (14 possessions), and the configuration before the last steps (clean-ball training, no touches)
+0.600 / 0.720 (15 possessions); the smoothed published baseline scores 0.326 / 0.621. One
+possession moves spellF1 by about six points here, and the window decided nothing — the `tracker`
+regime on 10 external matches did.
 With 17 possessions one possession moves spellF1 by about six points, so this confirms
 correctness, not a ranking.
 
@@ -343,8 +354,9 @@ Here is where our system draws those lines.
 - **A small yardstick.** Ten held-out matches, from two providers whose tracking is cleaner than
   ours. Augmentation narrows the gap between them and our match, but our match is a different
   tracker, league and camera.
-- **Too few short possessions.** On the held-out matches we predict about 321 possessions where
-  the labels have 412 (307 before touch features). Most of the remaining error is in fast
+- **Too few short possessions.** On held-out matches with the tracker-like ball we predict about
+  332 possessions where the labels have 412 (329 for the clean-trained model without touches,
+  303 before equal possession weights). Most of the remaining error is in fast
   exchanges.
 - **Our tracker smooths its ball, and we model that from aggregates.** We train on a ball smoothed
   to match aggregate statistics of the competition ball. The match is the closest thing to that
