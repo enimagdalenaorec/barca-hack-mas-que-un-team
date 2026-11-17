@@ -409,13 +409,16 @@ Here is where our system draws those lines.
   332 possessions where the labels have 412 (329 for the clean-trained model without touches,
   303 before equal possession weights). Most of the remaining error is in fast
   exchanges.
-- **Our tracker smooths its ball, and we model that from aggregates.** We train on a ball smoothed
-  to match aggregate statistics of the competition ball. The match is the closest thing to that
-  regime we can test on, but not the same: if the tracker's smoothing differs in shape (a Kalman
-  filter rather than a trailing average, say), part of the gain could be lost. Touches are blurred
-  too: two touches within a second merge, and a smoothed ball lags its player.
+- **Our tracker smooths its ball, and we only see that from aggregates.** We cannot measure the
+  shape of the smoothing, only whether the ball lags its players, and the configuration is chosen
+  on that one statistic. The two configurations are each poor on the other's ball: on held-out
+  external matches the clean configuration scores 0.506 on a lagging ball (the trailing one
+  0.665), and the trailing configuration 0.613 on a smoothed ball that does not lag (the clean
+  one 0.649, better on 9 of 10 matches). A wrong detection would cost that much; on the external
+  matches the detector was never wrong and the two groups of lags do not overlap. A smoothing of
+  another shape (a Kalman filter, say) is covered by neither simulation exactly. Touches are
+  blurred too: two touches within a second merge.
   - Fix: run our own ball detector on the tactical video to get a sharp ball track.
-- Without ball height, a header and a ground pass look alike.
 
 ## 6. Reproduction
 
